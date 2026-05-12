@@ -1,14 +1,10 @@
 'use client'
-import { useState } from 'react'
-import { fmtAmount, fmtRaw, fmtDate, MONTHS, MONTHS_S, CAT_EMOJI, type Expense, type Contribution, type SavingsGoal, type SavingsDeposit, type Trip, type Currency } from '@/types'
+import { useState, useEffect, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { fmtAmount, fmtRaw, fmtDate, MONTHS, MONTHS_S, CAT_EMOJI, toEUR, type Expense, type Contribution, type SavingsGoal, type SavingsDeposit, type Trip, type Currency } from '@/types'
 
 interface Props {
   householdId: string
-  expenses: Expense[]
-  contributions: Contribution[]
-  goals: SavingsGoal[]
-  deposits: SavingsDeposit[]
-  trips: Trip[]
   myName: string
   partnerName: string
 }
@@ -34,11 +30,81 @@ function activeMonthsOf(arr: { date: string }[], year: number) {
   return months
 }
 
-export default function DashboardClient({ expenses, contributions, goals, deposits, trips, myName, partnerName }: Props) {
+export default function DashboardClient({ householdId, myName, partnerName }: Props) {
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [contributions, setContributions] = useState<Contribution[]>([])
+  const [goals, setGoals] = useState<SavingsGoal[]>([])
+  const [deposits, setDeposits] = useState<SavingsDeposit[]>([])
+  const [trips, setTrips] = useState<Trip[]>([])
+  const [loading, setLoading] = useState(true)
+
   const [cur, setCur] = useState<Currency>('EUR')
   const [selYear, setSelYear] = useState(new Date().getFullYear())
   const [selMonth, setSelMonth] = useState(new Date().getMonth())
   const [viewMode, setViewMode] = useState<'month' | 'year'>('month')
+
+  const supabase = createClient()
+
+  const fetchAll = useCallback(async () => {
+    const [expRes, conRes, goalRes, depRes, tripRes] = await Promise.all([
+      supabase.from('expenses').select('*').eq('household_id', householdId).order('date', { ascending: false }),
+      supabase.from('contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }),
+      supabase.from('savings_goals').select('*').eq('household_id', householdId).order('created_at'),
+      supabase.from('savings_deposits').select('*').eq('household_id', householdId),
+      supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false }),
+    ])
+    setExpenses(expRes.data || [])
+    setContributions(conRes.data || [])
+    setGoals(goalRes.data || [])
+    setDeposits(depRes.data || [])
+    setTrips(tripRes.data || [])
+    setLoading(false)
+  }, [householdId])
+
+  useEffect(() => {
+    fetchAll()
+
+    // Refetch when tab becomes visible again (e.g. switching back from Trips)
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchAll() }
+    document.addEventListener('visibilitychange', onVisible)
+
+    // Refetch when window gains focus
+    const onFocus = () => fetchAll()
+    window.addEventListener('focus', onFocus)
+
+    // Subscribe to real-time changes — refetch full list on any change
+    const channel = supabase
+      .channel('dashboard-realtime-' + householdId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => {
+        supabase.from('expenses').select('*').eq('household_id', householdId).order('date', { ascending: false })
+          .then(({ data }) => { if (data) setExpenses(data) })
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contributions' }, () => {
+        supabase.from('contributions').select('*').eq('household_id', householdId).order('date', { ascending: false })
+          .then(({ data }) => { if (data) setContributions(data) })
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'savings_goals' }, () => {
+        supabase.from('savings_goals').select('*').eq('household_id', householdId).order('created_at')
+          .then(({ data }) => { if (data) setGoals(data) })
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'savings_deposits' }, () => {
+        supabase.from('savings_deposits').select('*').eq('household_id', householdId)
+          .then(({ data }) => { if (data) setDeposits(data) })
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, () => {
+        supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false })
+          .then(({ data }) => { if (data) setTrips(data) })
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [householdId, fetchAll])
+
+  const f = (eur: number) => fmtAmount(eur, cur)
 
   const years = getYears([expenses, contributions])
   const actMonths = activeMonthsOf([...expenses, ...contributions], selYear)
@@ -52,7 +118,6 @@ export default function DashboardClient({ expenses, contributions, goals, deposi
   const expEUR = exps.reduce((s, x) => s + x.amount_eur, 0)
   const netEUR = conEUR - expEUR
   const lbl = viewMode === 'year' ? String(selYear) : MONTHS[selMonth] + ' ' + selYear
-  const f = (eur: number) => fmtAmount(eur, cur)
 
   const cats: Record<string, number> = {}
   exps.forEach(e => { cats[e.category] = (cats[e.category] || 0) + e.amount_eur })
@@ -73,14 +138,22 @@ export default function DashboardClient({ expenses, contributions, goals, deposi
   }))
   const maxBar = Math.max(...monthlyData.map(d => Math.max(d.exp, d.con)), 1)
 
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--muted)', fontSize: 13 }}>
+      Loading dashboard...
+    </div>
+  )
+
   return (
     <>
+      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 500, letterSpacing: '-.01em' }}>Overview</div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{lbl}</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => fetchAll()} style={{ background: 'var(--surface2)', border: '0.5px solid var(--border)', borderRadius: 7, padding: '3px 11px', fontSize: 12, color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit' }} title="Refresh data">↻ Refresh</button>
           <div className="cur-toggle">
             <button className={`cur-btn ${viewMode === 'month' ? 'active' : ''}`} onClick={() => setViewMode('month')}>Month</button>
             <button className={`cur-btn ${viewMode === 'year' ? 'active' : ''}`} onClick={() => setViewMode('year')}>Year</button>
@@ -92,12 +165,14 @@ export default function DashboardClient({ expenses, contributions, goals, deposi
         </div>
       </div>
 
+      {/* Year pills */}
       <div className="year-row">
         {years.map(y => (
           <button key={y} className={`yr-btn ${y === selYear ? 'active' : ''}`} onClick={() => setSelYear(y)}>{y}</button>
         ))}
       </div>
 
+      {/* Month strip */}
       {viewMode === 'month' ? (
         <div className="timeline">
           {MONTHS_S.map((m, i) => (
@@ -110,6 +185,7 @@ export default function DashboardClient({ expenses, contributions, goals, deposi
         </div>
       ) : <div style={{ marginBottom: 22 }} />}
 
+      {/* 4 stat cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 10, marginBottom: 16 }}>
         <div className="stat s-acc">
           <div className="stat-lbl">Joint balance</div>
@@ -133,6 +209,7 @@ export default function DashboardClient({ expenses, contributions, goals, deposi
         </div>
       </div>
 
+      {/* Year view extras */}
       {viewMode === 'year' && (
         <>
           <div className="card" style={{ marginBottom: 14 }}>
@@ -261,7 +338,7 @@ export default function DashboardClient({ expenses, contributions, goals, deposi
                 </div>
                 {[
                   { label: `🧾 ${myName} paid`, val: youSpent, color: 'var(--acc)' },
-                  { label: '🤝 Shared / Joint', val: sharedSpent, color: 'var(--green)' },
+                  { label: '🤝 Joint', val: sharedSpent, color: 'var(--green)' },
                   { label: `🤲 ${partnerName} paid`, val: partnerSpent, color: 'var(--blue)' },
                 ].map(row => (
                   <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderBottom: '0.5px solid var(--border)' }}>
