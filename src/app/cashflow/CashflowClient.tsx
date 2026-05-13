@@ -5,8 +5,23 @@ import { createClient } from '@/lib/supabase/client'
 const EUR_CZK = 24.5
 
 interface Month { id: string; name: string; sort_order: number }
-interface Row { id: string; month_id: string; type: string; description: string; account: string; amount: number; highlight: string }
+interface Row { id: string; month_id: string; type: string; description: string; account: string; amount: number; highlight: string; synced: boolean }
 interface Note { id: string; month_id: string; label: string; amount: number; color: string }
+
+const EXPENSE_CAT_MAP: Record<string, string> = {
+  'groceries': 'Groceries', 'grocery': 'Groceries', 'food': 'Restaurants', 'restaurant': 'Restaurants',
+  'transport': 'Transport', 'travel': 'Travel', 'flight': 'Travel', 'hotel': 'Household',
+  'health': 'Health', 'entertainment': 'Entertainment', 'shopping': 'Shopping',
+  'utility': 'Utilities', 'utilities': 'Utilities', 'household': 'Household',
+}
+
+function guessCategory(desc: string): string {
+  const low = desc.toLowerCase()
+  for (const [key, val] of Object.entries(EXPENSE_CAT_MAP)) {
+    if (low.includes(key)) return val
+  }
+  return 'Other'
+}
 
 export default function CashflowClient({ householdId }: { householdId: string }) {
   const [months, setMonths] = useState<Month[]>([])
@@ -26,8 +41,8 @@ export default function CashflowClient({ householdId }: { householdId: string })
       supabase.from('cashflow_rows').select('*').eq('household_id', householdId),
       supabase.from('cashflow_highlights').select('*').eq('household_id', householdId),
     ])
-    if (m.data) { setMonths(m.data); if (!activeId && m.data.length > 0) setActiveId(m.data[0].id) }
-    if (r.data) setRows(r.data)
+    if (m.data) { setMonths(m.data); if (m.data.length > 0) setActiveId(prev => prev || m.data![0].id) }
+    if (r.data) setRows(r.data as Row[])
     if (n.data) setNotes(n.data)
   }
 
@@ -46,6 +61,7 @@ export default function CashflowClient({ householdId }: { householdId: string })
   const net = totalIn - totalOut
   const mNotes = notes.filter(n => n.month_id === activeId)
   const active = months.find(m => m.id === activeId)
+  const syncedCount = outRows.filter(r => r.synced).length
 
   async function createMonth() {
     const name = newMonth.trim()
@@ -62,6 +78,11 @@ export default function CashflowClient({ householdId }: { householdId: string })
   }
 
   async function deleteMonth(id: string) {
+    // Remove synced expenses for this month's rows
+    const monthRows = rows.filter(r => r.month_id === id && r.synced)
+    for (const row of monthRows) {
+      await supabase.from('expenses').delete().eq('household_id', householdId).eq('description', '[CF] ' + row.description)
+    }
     await supabase.from('cashflow_months').delete().eq('id', id)
     const next = months.find(m => m.id !== id)
     setMonths(p => p.filter(m => m.id !== id))
@@ -73,64 +94,69 @@ export default function CashflowClient({ householdId }: { householdId: string })
   async function addRow(type: string) {
     if (!activeId) return
     const { data } = await supabase.from('cashflow_rows')
-      .insert({ month_id: activeId, household_id: householdId, type, description: '', account: '', amount: 0, highlight: '' })
+      .insert({ month_id: activeId, household_id: householdId, type, description: '', account: '', amount: 0, highlight: '', synced: false })
       .select().single()
-    if (data) setRows(p => [...p, data])
+    if (data) setRows(p => [...p, data as Row])
   }
 
-  async function saveRow(id: string, field: string, val: string | number) {
-    const updated = rows.map(r => r.id === id ? { ...r, [field]: val } : r)
-    setRows(updated)
+  async function saveRow(id: string, field: string, val: string | number | boolean) {
+    setRows(p => p.map(r => r.id === id ? { ...r, [field]: val } : r))
     await supabase.from('cashflow_rows').update({ [field]: val }).eq('id', id)
+  }
 
-    // Mirror to main expenses/contributions when row is complete
-    const row = updated.find(r => r.id === id)
-    if (!row || !row.description || !row.amount || row.amount <= 0) return
-    const active = months.find(m => m.id === activeId)
-    const monthName = active?.name || 'Cashflow'
+  async function toggleSync(row: Row) {
+    const newSynced = !row.synced
+    await saveRow(row.id, 'synced', newSynced)
 
-    if (row.type === 'out') {
-      // Write to expenses — upsert by cashflow row id stored in description prefix
-      const existing = await supabase.from('expenses')
-        .select('id').eq('household_id', householdId)
-        .eq('description', '[' + monthName + '] ' + row.description).maybeSingle()
+    if (newSynced) {
+      // Add to main expenses
+      const cat = guessCategory(row.description)
+      const month = months.find(m => m.id === row.month_id)
       const today = new Date().toISOString().split('T')[0]
-      if (existing.data) {
-        await supabase.from('expenses').update({ amount: row.amount, amount_eur: row.amount / 24.5, description: '[' + monthName + '] ' + row.description }).eq('id', existing.data.id)
-      } else {
-        await supabase.from('expenses').insert({ household_id: householdId, description: '[' + monthName + '] ' + row.description, amount: row.amount, currency: 'CZK', amount_eur: row.amount / 24.5, category: 'Other', paid_by: 'joint', date: today })
-      }
-    } else if (row.type === 'in') {
-      // Write to contributions
-      const existing = await supabase.from('contributions')
-        .select('id').eq('household_id', householdId)
-        .eq('note', '[' + monthName + '] ' + row.description).maybeSingle()
-      const today = new Date().toISOString().split('T')[0]
-      if (existing.data) {
-        await supabase.from('contributions').update({ amount: row.amount, amount_eur: row.amount / 24.5 }).eq('id', existing.data.id)
-      } else {
-        await supabase.from('contributions').insert({ household_id: householdId, person: 'joint', amount: row.amount, currency: 'CZK', amount_eur: row.amount / 24.5, date: today, note: '[' + monthName + '] ' + row.description })
-      }
+      await supabase.from('expenses').insert({
+        household_id: householdId,
+        description: '[CF] ' + (row.description || 'Cashflow expense'),
+        amount: row.amount,
+        currency: 'CZK',
+        amount_eur: row.amount / EUR_CZK,
+        category: cat,
+        paid_by: 'joint',
+        date: today,
+      })
+    } else {
+      // Remove from main expenses
+      await supabase.from('expenses')
+        .delete()
+        .eq('household_id', householdId)
+        .eq('description', '[CF] ' + row.description)
     }
   }
 
-  async function deleteRow(id: string) {
-    // Find the row before deleting so we can clean up mirrors
-    const row = rows.find(r => r.id === id)
-    const active = months.find(m => m.id === activeId)
-    const monthName = active?.name || 'Cashflow'
-
-    setRows(p => p.filter(r => r.id !== id))
-    await supabase.from('cashflow_rows').delete().eq('id', id)
-
-    // Remove mirrored records
-    if (row?.description) {
-      if (row.type === 'out') {
-        await supabase.from('expenses').delete().eq('household_id', householdId).eq('description', '[' + monthName + '] ' + row.description)
-      } else if (row.type === 'in') {
-        await supabase.from('contributions').delete().eq('household_id', householdId).eq('note', '[' + monthName + '] ' + row.description)
-      }
+  async function saveAndSync(row: Row, field: string, val: string | number) {
+    const updated = { ...row, [field]: val }
+    await saveRow(row.id, field, val)
+    // If synced, update the mirrored expense too
+    if (row.synced) {
+      const newDesc = field === 'description' ? '[CF] ' + val : '[CF] ' + row.description
+      const newAmt = field === 'amount' ? Number(val) : row.amount
+      await supabase.from('expenses')
+        .update({
+          description: newDesc,
+          amount: newAmt,
+          amount_eur: newAmt / EUR_CZK,
+          category: guessCategory(field === 'description' ? String(val) : row.description),
+        })
+        .eq('household_id', householdId)
+        .eq('description', '[CF] ' + row.description)
     }
+  }
+
+  async function deleteRow(row: Row) {
+    if (row.synced) {
+      await supabase.from('expenses').delete().eq('household_id', householdId).eq('description', '[CF] ' + row.description)
+    }
+    setRows(p => p.filter(r => r.id !== row.id))
+    await supabase.from('cashflow_rows').delete().eq('id', row.id)
   }
 
   async function cycleHL(row: Row) {
@@ -162,9 +188,7 @@ export default function CashflowClient({ householdId }: { householdId: string })
     return m[h] || ''
   }
 
-  const s = {
-    cell: { background: 'transparent', border: 'none', fontFamily: 'inherit', fontSize: 13, color: 'var(--text)', outline: 'none', width: '100%', padding: '8px 12px' } as React.CSSProperties,
-  }
+  const cell: React.CSSProperties = { background: 'transparent', border: 'none', fontFamily: 'inherit', fontSize: 13, color: 'var(--text)', outline: 'none', width: '100%', padding: '8px 12px' }
 
   function Table({ type, rowList }: { type: string; rowList: Row[] }) {
     const isIn = type === 'in'
@@ -174,32 +198,39 @@ export default function CashflowClient({ householdId }: { householdId: string })
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: isIn ? 'var(--green)' : 'var(--red)', display: 'inline-block' }} />
             <span style={{ fontSize: 13, fontWeight: 500 }}>{isIn ? 'Cash in' : 'Cash out'}</span>
+            {!isIn && syncedCount > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--acc)', background: 'rgba(124,111,247,.12)', padding: '2px 7px', borderRadius: 20 }}>
+                {syncedCount} synced to dashboard
+              </span>
+            )}
           </div>
           <span style={{ fontSize: 14, fontWeight: 500, color: isIn ? 'var(--green)' : 'var(--red)' }}>
             {fmt(isIn ? totalIn : totalOut)}
           </span>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 130px 120px 40px', background: 'var(--surface2)', borderBottom: '0.5px solid var(--border)' }}>
-          {['Description', 'Account', 'Amount', ''].map((h, i) => (
-            <div key={i} style={{ padding: '5px 12px', fontSize: 11, color: 'var(--muted)', borderLeft: i > 0 ? '0.5px solid var(--border)' : 'none', textAlign: i === 2 ? 'right' : 'left' }}>{h}</div>
-          ))}
+        <div style={{ display: 'grid', gridTemplateColumns: isIn ? '1fr 130px 120px 40px' : '1fr 130px 120px 60px 40px', background: 'var(--surface2)', borderBottom: '0.5px solid var(--border)' }}>
+          <div style={{ padding: '5px 12px', fontSize: 11, color: 'var(--muted)' }}>Description</div>
+          <div style={{ padding: '5px 12px', fontSize: 11, color: 'var(--muted)', borderLeft: '0.5px solid var(--border)' }}>Account</div>
+          <div style={{ padding: '5px 12px', fontSize: 11, color: 'var(--muted)', borderLeft: '0.5px solid var(--border)', textAlign: 'right' }}>Amount</div>
+          {!isIn && <div style={{ padding: '5px 8px', fontSize: 11, color: 'var(--muted)', borderLeft: '0.5px solid var(--border)', textAlign: 'center' }} title="Sync to main expenses & dashboard">Dashboard</div>}
+          <div style={{ borderLeft: '0.5px solid var(--border)' }} />
         </div>
 
         {rowList.map(row => (
-          <div key={row.id} style={{ display: 'grid', gridTemplateColumns: '1fr 130px 120px 40px', borderBottom: '0.5px solid var(--border)', background: hlBg(row.highlight), borderLeft: row.highlight ? `3px solid ${row.highlight}` : '3px solid transparent' }}>
+          <div key={row.id} style={{ display: 'grid', gridTemplateColumns: isIn ? '1fr 130px 120px 40px' : '1fr 130px 120px 60px 40px', borderBottom: '0.5px solid var(--border)', background: hlBg(row.highlight), borderLeft: row.highlight ? `3px solid ${row.highlight}` : '3px solid transparent' }}>
             <input
               defaultValue={row.description}
               placeholder="Description"
-              onBlur={e => saveRow(row.id, 'description', e.target.value)}
+              onBlur={e => saveAndSync(row, 'description', e.target.value)}
               onKeyDown={e => e.key === 'Enter' && addRow(type)}
-              style={{ ...s.cell }}
+              style={cell}
             />
             <input
               defaultValue={row.account}
               placeholder="Account"
               onBlur={e => saveRow(row.id, 'account', e.target.value)}
-              style={{ ...s.cell, fontSize: 12, color: 'var(--muted)', borderLeft: '0.5px solid var(--border)' }}
+              style={{ ...cell, fontSize: 12, color: 'var(--muted)', borderLeft: '0.5px solid var(--border)' }}
             />
             <input
               key={cur + row.id}
@@ -208,24 +239,41 @@ export default function CashflowClient({ householdId }: { householdId: string })
               placeholder="0"
               onBlur={e => {
                 const v = parseFloat(e.target.value) || 0
-                saveRow(row.id, 'amount', cur === 'CZK' ? v : Math.round(v * EUR_CZK))
+                saveAndSync(row, 'amount', cur === 'CZK' ? v : Math.round(v * EUR_CZK))
               }}
               onKeyDown={e => e.key === 'Enter' && addRow(type)}
-              style={{ ...s.cell, textAlign: 'right', fontWeight: 500, color: isIn ? 'var(--green)' : 'var(--red)', borderLeft: '0.5px solid var(--border)' }}
+              style={{ ...cell, textAlign: 'right', fontWeight: 500, color: isIn ? 'var(--green)' : 'var(--red)', borderLeft: '0.5px solid var(--border)' }}
             />
+            {!isIn && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: '0.5px solid var(--border)' }}>
+                <button
+                  onClick={() => toggleSync(row)}
+                  title={row.synced ? 'Remove from dashboard' : 'Add to main expenses & dashboard'}
+                  style={{
+                    width: 28, height: 16, borderRadius: 8, border: 'none', cursor: 'pointer', padding: 0,
+                    background: row.synced ? 'var(--acc)' : 'var(--faint)',
+                    position: 'relative', transition: 'background .2s', flexShrink: 0,
+                  }}>
+                  <span style={{
+                    position: 'absolute', top: 2, left: row.synced ? 14 : 2,
+                    width: 12, height: 12, borderRadius: '50%', background: '#fff',
+                    transition: 'left .2s', display: 'block',
+                  }} />
+                </button>
+              </div>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, borderLeft: '0.5px solid var(--border)' }}>
               <button onClick={() => cycleHL(row)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: row.highlight || 'var(--faint)', border: '1.5px solid var(--border2)', display: 'inline-block' }} />
               </button>
-              <button onClick={() => deleteRow(row.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 12 }}>✕</button>
+              <button onClick={() => deleteRow(row)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 12 }}>✕</button>
             </div>
           </div>
         ))}
 
         <button
           onClick={() => addRow(type)}
-          style={{ width: '100%', padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, color: 'var(--muted)', textAlign: 'left', borderTop: rowList.length > 0 ? '0.5px solid var(--border)' : 'none' }}
-        >
+          style={{ width: '100%', padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, color: 'var(--muted)', textAlign: 'left', borderTop: rowList.length > 0 ? '0.5px solid var(--border)' : 'none' }}>
           + Add row
         </button>
       </div>
@@ -234,13 +282,11 @@ export default function CashflowClient({ householdId }: { householdId: string })
 
   return (
     <div style={{ paddingBottom: 40 }}>
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22, flexWrap: 'wrap', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           {months.map(m => (
             <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <button
-                onClick={() => setActiveId(m.id)}
+              <button onClick={() => setActiveId(m.id)}
                 style={{ padding: '5px 12px', border: m.id === activeId ? '0.5px solid var(--border2)' : '0.5px solid transparent', borderRadius: 7, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', fontWeight: m.id === activeId ? 500 : 400, background: m.id === activeId ? 'var(--surface)' : 'transparent', color: m.id === activeId ? 'var(--text)' : 'var(--muted)' }}>
                 {m.name}
               </button>
@@ -250,19 +296,12 @@ export default function CashflowClient({ householdId }: { householdId: string })
             </div>
           ))}
           {showAdd ? (
-            <input
-              autoFocus
-              value={newMonth}
-              onChange={e => setNewMonth(e.target.value)}
-              placeholder="Month name"
+            <input autoFocus value={newMonth} onChange={e => setNewMonth(e.target.value)} placeholder="Month name"
               onKeyDown={e => { if (e.key === 'Enter') createMonth(); if (e.key === 'Escape') { setShowAdd(false); setNewMonth('') } }}
-              onBlur={() => { if (newMonth.trim()) createMonth(); else setShowAdd(false) }}
-              style={{ padding: '5px 10px', borderRadius: 7, border: '0.5px solid var(--acc)', background: 'var(--surface)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 13, width: 110, outline: 'none' }}
-            />
+              onBlur={() => newMonth.trim() ? createMonth() : setShowAdd(false)}
+              style={{ padding: '5px 10px', borderRadius: 7, border: '0.5px solid var(--acc)', background: 'var(--surface)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 13, width: 110, outline: 'none' }} />
           ) : (
-            <button onClick={() => setShowAdd(true)} style={{ padding: '5px 10px', border: '0.5px dashed var(--border2)', borderRadius: 7, fontSize: 12, cursor: 'pointer', background: 'transparent', color: 'var(--muted)', fontFamily: 'inherit' }}>
-              + Month
-            </button>
+            <button onClick={() => setShowAdd(true)} style={{ padding: '5px 10px', border: '0.5px dashed var(--border2)', borderRadius: 7, fontSize: 12, cursor: 'pointer', background: 'transparent', color: 'var(--muted)', fontFamily: 'inherit' }}>+ Month</button>
           )}
         </div>
         <div style={{ display: 'flex', background: 'var(--surface2)', borderRadius: 8, padding: 2, gap: 2 }}>
@@ -282,14 +321,12 @@ export default function CashflowClient({ householdId }: { householdId: string })
             <Table type="in" rowList={inRows} />
             <Table type="out" rowList={outRows} />
           </div>
-
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, position: 'sticky', top: 16 }}>
             <div className="card" style={{ padding: '18px 16px', textAlign: 'center' }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>{active?.name} — net</div>
               <div style={{ fontSize: 26, fontWeight: 500, color: net >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmt(net)}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{net >= 0 ? 'surplus' : 'deficit'}</div>
             </div>
-
             <div className="card">
               <div className="card-head"><span className="card-title">Summary</span></div>
               <div style={{ padding: '6px 0' }}>
@@ -305,7 +342,6 @@ export default function CashflowClient({ householdId }: { householdId: string })
                 </div>
               </div>
             </div>
-
             <div className="card">
               <div className="card-head">
                 <span className="card-title">Notes & balances</span>
@@ -318,8 +354,8 @@ export default function CashflowClient({ householdId }: { householdId: string })
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: n.color, flexShrink: 0 }} />
                   <input defaultValue={n.label} placeholder="Label" onBlur={e => saveNote(n.id, 'label', e.target.value)}
                     style={{ flex: 1, background: 'transparent', border: 'none', fontFamily: 'inherit', fontSize: 12, color: 'var(--text)', outline: 'none', minWidth: 0 }} />
-                  <input key={cur + n.id} type="number" defaultValue={n.amount > 0 ? (cur === 'CZK' ? Math.round(n.amount) : +(n.amount / EUR_CZK).toFixed(2)) : ''}
-                    placeholder="0" onBlur={e => { const v = parseFloat(e.target.value) || 0; saveNote(n.id, 'amount', cur === 'CZK' ? v : Math.round(v * EUR_CZK)) }}
+                  <input key={cur + n.id} type="number" defaultValue={n.amount > 0 ? (cur === 'CZK' ? Math.round(n.amount) : +(n.amount / EUR_CZK).toFixed(2)) : ''} placeholder="0"
+                    onBlur={e => { const v = parseFloat(e.target.value) || 0; saveNote(n.id, 'amount', cur === 'CZK' ? v : Math.round(v * EUR_CZK)) }}
                     style={{ width: 72, background: 'transparent', border: 'none', fontFamily: 'inherit', fontSize: 12, fontWeight: 500, color: 'var(--text)', outline: 'none', textAlign: 'right' }} />
                   <button onClick={() => deleteNote(n.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 12 }}>✕</button>
                 </div>
