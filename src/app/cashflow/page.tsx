@@ -14,10 +14,11 @@ export default async function CashflowPage() {
   const myProfile = allProfiles?.find(p => p.id === user.id)
   const partnerProfile = allProfiles?.find(p => p.id !== user.id)
 
-  const { data: months } = await supabase.from('cashflow_months').select('*').eq('household_id', hid).order('sort_order').order('created_at')
-  const { data: sections } = await supabase.from('cashflow_sections').select('*').eq('household_id', hid).order('sort_order')
-  const { data: rows } = await supabase.from('cashflow_rows').select('*').eq('household_id', hid).order('sort_order')
-  const { data: highlights } = await supabase.from('cashflow_highlights').select('*').eq('household_id', hid).order('sort_order')
+  const [{ data: months }, { data: rows }, { data: notes }] = await Promise.all([
+    supabase.from('cashflow_months').select('*').eq('household_id', hid).order('sort_order').order('created_at'),
+    supabase.from('cashflow_rows').select('*').eq('household_id', hid).order('sort_order'),
+    supabase.from('cashflow_highlights').select('*').eq('household_id', hid).order('sort_order'),
+  ])
 
   return (
     <div className="shell">
@@ -34,9 +35,8 @@ export default async function CashflowPage() {
           <CashflowClient
             householdId={hid}
             initialMonths={months || []}
-            initialSections={sections || []}
-            initialRows={rows || []}
-            initialHighlights={highlights || []}
+            initialRows={(rows || []) as any}
+            initialNotes={(notes || []) as any}
           />
         </div>
       </div>
