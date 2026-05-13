@@ -79,13 +79,58 @@ export default function CashflowClient({ householdId }: { householdId: string })
   }
 
   async function saveRow(id: string, field: string, val: string | number) {
-    setRows(p => p.map(r => r.id === id ? { ...r, [field]: val } : r))
+    const updated = rows.map(r => r.id === id ? { ...r, [field]: val } : r)
+    setRows(updated)
     await supabase.from('cashflow_rows').update({ [field]: val }).eq('id', id)
+
+    // Mirror to main expenses/contributions when row is complete
+    const row = updated.find(r => r.id === id)
+    if (!row || !row.description || !row.amount || row.amount <= 0) return
+    const active = months.find(m => m.id === activeId)
+    const monthName = active?.name || 'Cashflow'
+
+    if (row.type === 'out') {
+      // Write to expenses — upsert by cashflow row id stored in description prefix
+      const existing = await supabase.from('expenses')
+        .select('id').eq('household_id', householdId)
+        .eq('description', '[' + monthName + '] ' + row.description).maybeSingle()
+      const today = new Date().toISOString().split('T')[0]
+      if (existing.data) {
+        await supabase.from('expenses').update({ amount: row.amount, amount_eur: row.amount / 24.5, description: '[' + monthName + '] ' + row.description }).eq('id', existing.data.id)
+      } else {
+        await supabase.from('expenses').insert({ household_id: householdId, description: '[' + monthName + '] ' + row.description, amount: row.amount, currency: 'CZK', amount_eur: row.amount / 24.5, category: 'Other', paid_by: 'joint', date: today })
+      }
+    } else if (row.type === 'in') {
+      // Write to contributions
+      const existing = await supabase.from('contributions')
+        .select('id').eq('household_id', householdId)
+        .eq('note', '[' + monthName + '] ' + row.description).maybeSingle()
+      const today = new Date().toISOString().split('T')[0]
+      if (existing.data) {
+        await supabase.from('contributions').update({ amount: row.amount, amount_eur: row.amount / 24.5 }).eq('id', existing.data.id)
+      } else {
+        await supabase.from('contributions').insert({ household_id: householdId, person: 'joint', amount: row.amount, currency: 'CZK', amount_eur: row.amount / 24.5, date: today, note: '[' + monthName + '] ' + row.description })
+      }
+    }
   }
 
   async function deleteRow(id: string) {
+    // Find the row before deleting so we can clean up mirrors
+    const row = rows.find(r => r.id === id)
+    const active = months.find(m => m.id === activeId)
+    const monthName = active?.name || 'Cashflow'
+
     setRows(p => p.filter(r => r.id !== id))
     await supabase.from('cashflow_rows').delete().eq('id', id)
+
+    // Remove mirrored records
+    if (row?.description) {
+      if (row.type === 'out') {
+        await supabase.from('expenses').delete().eq('household_id', householdId).eq('description', '[' + monthName + '] ' + row.description)
+      } else if (row.type === 'in') {
+        await supabase.from('contributions').delete().eq('household_id', householdId).eq('note', '[' + monthName + '] ' + row.description)
+      }
+    }
   }
 
   async function cycleHL(row: Row) {
