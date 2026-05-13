@@ -11,15 +11,8 @@ export default async function CashflowPage() {
   if (!profile?.household_id) redirect('/dashboard')
   const hid = profile.household_id
   const { data: allProfiles } = await supabase.from('profiles').select('*').eq('household_id', hid)
-  const myProfile = allProfiles?.find(p => p.id === user.id)
-  const partnerProfile = allProfiles?.find(p => p.id !== user.id)
-
-  const [{ data: months }, { data: rows }, { data: notes }] = await Promise.all([
-    supabase.from('cashflow_months').select('*').eq('household_id', hid).order('sort_order').order('created_at'),
-    supabase.from('cashflow_rows').select('*').eq('household_id', hid).order('sort_order'),
-    supabase.from('cashflow_highlights').select('*').eq('household_id', hid).order('sort_order'),
-  ])
-
+  const myProfile = allProfiles?.find((p: any) => p.id === user.id)
+  const partnerProfile = allProfiles?.find((p: any) => p.id !== user.id)
   return (
     <div className="shell">
       <Sidebar
@@ -32,12 +25,7 @@ export default async function CashflowPage() {
       <div className="main">
         <div className="topbar"><span className="page-heading">Cashflow</span></div>
         <div className="content">
-          <CashflowClient
-            householdId={hid}
-            initialMonths={months || []}
-            initialRows={(rows || []) as any}
-            initialNotes={(notes || []) as any}
-          />
+          <CashflowClient householdId={hid} />
         </div>
       </div>
     </div>
