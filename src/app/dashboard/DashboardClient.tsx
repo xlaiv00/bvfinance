@@ -5,16 +5,16 @@ import { fmtAmount, fmtRaw, fmtDate, MONTHS, MONTHS_S, CAT_EMOJI, type Expense, 
 
 interface Props { householdId: string; myName: string; partnerName: string }
 
-function getYears(arrs: { date?: string; created_at?: string }[][]) {
-  const ys: number[] = [new Date().getFullYear()]
-  arrs.flat().forEach(x => { const d = x.date || x.created_at; if (d) { const y = new Date(d).getFullYear(); if (!ys.includes(y)) ys.push(y) } })
-  return ys.sort()
-}
 function filterMonth<T extends { date: string }>(arr: T[], m: number, y: number) {
   return arr.filter(x => { const d = new Date(x.date + 'T12:00:00'); return d.getMonth() === m && d.getFullYear() === y })
 }
 function filterYear<T extends { date: string }>(arr: T[], y: number) {
   return arr.filter(x => new Date(x.date + 'T12:00:00').getFullYear() === y)
+}
+function getYears(arrs: { date?: string }[][]) {
+  const ys: number[] = [new Date().getFullYear()]
+  arrs.flat().forEach(x => { if (x.date) { const y = new Date(x.date + 'T12:00:00').getFullYear(); if (!ys.includes(y)) ys.push(y) } })
+  return ys.sort()
 }
 function activeMonthsOf(arr: { date: string }[], year: number) {
   const months: number[] = []
@@ -23,59 +23,40 @@ function activeMonthsOf(arr: { date: string }[], year: number) {
   return months
 }
 
-const CURRENCIES: Currency[] = ['EUR', 'CZK']
-
 export default function DashboardClient({ householdId, myName, partnerName }: Props) {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [contributions, setContributions] = useState<Contribution[]>([])
   const [trips, setTrips] = useState<Trip[]>([])
   const [loading, setLoading] = useState(true)
-  const [cur, setCur] = useState<Currency>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('together_default_currency') as Currency) || 'EUR'
-    }
-    return 'EUR'
-  })
+  const [cur, setCur] = useState<Currency>(() => typeof window !== 'undefined' ? (localStorage.getItem('together_cur') as Currency || 'EUR') : 'EUR')
   const [selYear, setSelYear] = useState(new Date().getFullYear())
   const [selMonth, setSelMonth] = useState(new Date().getMonth())
-  const [viewMode, setViewMode] = useState<'month' | 'year'>('month')
+  const [viewMode, setViewMode] = useState<'month'|'year'>('month')
   const supabase = createClient()
 
-  function setAndSaveCur(c: Currency) {
-    setCur(c)
-    localStorage.setItem('together_default_currency', c)
-  }
+  function setAndSaveCur(c: Currency) { setCur(c); localStorage.setItem('together_cur', c) }
 
   const fetchAll = useCallback(async () => {
-    const [expRes, conRes, tripRes] = await Promise.all([
+    const [e, c, t] = await Promise.all([
       supabase.from('expenses').select('*').eq('household_id', householdId).order('date', { ascending: false }),
       supabase.from('contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }),
       supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false }),
     ])
-    setExpenses(expRes.data || [])
-    setContributions(conRes.data || [])
-    setTrips(tripRes.data || [])
+    setExpenses(e.data || []); setContributions(c.data || []); setTrips(t.data || [])
     setLoading(false)
   }, [householdId])
 
   useEffect(() => {
     fetchAll()
-    const onVisible = () => { if (document.visibilityState === 'visible') fetchAll() }
-    const onFocus = () => fetchAll()
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onFocus)
-    const channel = supabase.channel('dash-rt-' + householdId)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => {
-        supabase.from('expenses').select('*').eq('household_id', householdId).order('date', { ascending: false }).then(({ data }) => { if (data) setExpenses(data) })
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contributions' }, () => {
-        supabase.from('contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }).then(({ data }) => { if (data) setContributions(data) })
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, () => {
-        supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false }).then(({ data }) => { if (data) setTrips(data) })
-      })
+    const onVis = () => { if (document.visibilityState === 'visible') fetchAll() }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('focus', fetchAll)
+    const ch = supabase.channel('dash-' + householdId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => supabase.from('expenses').select('*').eq('household_id', householdId).order('date', { ascending: false }).then(({ data }) => { if (data) setExpenses(data) }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contributions' }, () => supabase.from('contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }).then(({ data }) => { if (data) setContributions(data) }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, () => supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false }).then(({ data }) => { if (data) setTrips(data) }))
       .subscribe()
-    return () => { supabase.removeChannel(channel); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onFocus) }
+    return () => { supabase.removeChannel(ch); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('focus', fetchAll) }
   }, [householdId, fetchAll])
 
   const f = (eur: number) => fmtAmount(eur, cur)
@@ -96,93 +77,54 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
   const youSpent = exps.filter(e => e.paid_by === 'you').reduce((s, e) => s + e.amount_eur, 0)
   const partnerSpent = exps.filter(e => e.paid_by === 'partner').reduce((s, e) => s + e.amount_eur, 0)
   const sharedSpent = exps.filter(e => e.paid_by === 'joint').reduce((s, e) => s + e.amount_eur, 0)
-  const monthlyData = MONTHS_S.map((m, i) => ({
-    m, label: MONTHS[i],
-    exp: filterMonth(expenses, i, selYear).reduce((s, x) => s + x.amount_eur, 0),
-    con: filterMonth(contributions, i, selYear).reduce((s, x) => s + x.amount_eur, 0),
-  }))
+  const monthlyData = MONTHS_S.map((m, i) => ({ m, label: MONTHS[i], exp: filterMonth(expenses, i, selYear).reduce((s, x) => s + x.amount_eur, 0), con: filterMonth(contributions, i, selYear).reduce((s, x) => s + x.amount_eur, 0) }))
   const maxBar = Math.max(...monthlyData.map(d => Math.max(d.exp, d.con)), 1)
 
-  if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--muted)', fontSize: 13 }}>
-      Loading dashboard...
-    </div>
-  )
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--muted)', fontSize: 13 }}>Loading...</div>
 
   return (
     <>
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 500, letterSpacing: '-.01em' }}>Overview</div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{lbl}</div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={() => fetchAll()} style={{ background: 'var(--surface2)', border: '0.5px solid var(--border)', borderRadius: 7, padding: '4px 10px', fontSize: 12, color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit' }}>↻</button>
+          <button onClick={fetchAll} style={{ background: 'var(--surface2)', border: '0.5px solid var(--border)', borderRadius: 7, padding: '4px 10px', fontSize: 12, color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit' }}>↻</button>
           <div className="cur-toggle">
-            <button className={`cur-btn ${viewMode === 'month' ? 'active' : ''}`} onClick={() => setViewMode('month')}>Month</button>
-            <button className={`cur-btn ${viewMode === 'year' ? 'active' : ''}`} onClick={() => setViewMode('year')}>Year</button>
+            <button className={'cur-btn ' + (viewMode === 'month' ? 'active' : '')} onClick={() => setViewMode('month')}>Month</button>
+            <button className={'cur-btn ' + (viewMode === 'year' ? 'active' : '')} onClick={() => setViewMode('year')}>Year</button>
           </div>
-          {/* Default currency selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>Currency</span>
             <div className="cur-toggle">
-              {CURRENCIES.map(c => (
-                <button key={c} className={`cur-btn ${cur === c ? 'active' : ''}`} onClick={() => setAndSaveCur(c)}
-                  title={c === cur ? 'Default currency (saved)' : `Switch to ${c}`}>
-                  {c}
-                </button>
+              {(['EUR','CZK'] as Currency[]).map(c => (
+                <button key={c} className={'cur-btn ' + (cur === c ? 'active' : '')} onClick={() => setAndSaveCur(c)} title={c === cur ? 'Default (saved)' : 'Switch to ' + c}>{c}</button>
               ))}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Year pills */}
-      <div className="year-row">
-        {years.map(y => (
-          <button key={y} className={`yr-btn ${y === selYear ? 'active' : ''}`} onClick={() => setSelYear(y)}>{y}</button>
-        ))}
-      </div>
+      <div className="year-row">{years.map(y => <button key={y} className={'yr-btn ' + (y === selYear ? 'active' : '')} onClick={() => setSelYear(y)}>{y}</button>)}</div>
 
-      {/* Month strip */}
       {viewMode === 'month' ? (
         <div className="timeline">
           {MONTHS_S.map((m, i) => (
-            <button key={i} onClick={() => setSelMonth(i)}
-              className={`tl-btn ${i === selMonth ? 'active' : ''} ${actMonths.includes(i) ? 'has-data' : ''}`}>
-              <span className="tl-m">{m}</span>
-              <span className="tl-dot">●</span>
+            <button key={i} onClick={() => setSelMonth(i)} className={'tl-btn ' + (i === selMonth ? 'active ' : '') + (actMonths.includes(i) ? 'has-data' : '')}>
+              <span className="tl-m">{m}</span><span className="tl-dot">●</span>
             </button>
           ))}
         </div>
       ) : <div style={{ marginBottom: 22 }} />}
 
-      {/* 4 stat cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 10, marginBottom: 16 }}>
-        <div className="stat s-acc">
-          <div className="stat-lbl">Joint balance</div>
-          <div className="stat-val acc">{f(allConEUR - allExpEUR)}</div>
-          <div className="stat-sub">All time</div>
-        </div>
-        <div className="stat s-green">
-          <div className="stat-lbl">Money in</div>
-          <div className="stat-val green">{f(conEUR)}</div>
-          <div className="stat-sub">{lbl}</div>
-        </div>
-        <div className="stat s-red">
-          <div className="stat-lbl">Spent</div>
-          <div className="stat-val red">{f(expEUR)}</div>
-          <div className="stat-sub">{lbl}</div>
-        </div>
-        <div className={`stat ${netEUR >= 0 ? 's-green' : 's-red'}`}>
-          <div className="stat-lbl">Net</div>
-          <div className={`stat-val ${netEUR >= 0 ? 'green' : 'red'}`}>{netEUR >= 0 ? '+' : ''}{f(netEUR)}</div>
-          <div className="stat-sub">In minus Out</div>
-        </div>
+        <div className="stat s-acc"><div className="stat-lbl">Joint balance</div><div className="stat-val acc">{f(allConEUR - allExpEUR)}</div><div className="stat-sub">All time</div></div>
+        <div className="stat s-green"><div className="stat-lbl">Money in</div><div className="stat-val green">{f(conEUR)}</div><div className="stat-sub">{lbl}</div></div>
+        <div className="stat s-red"><div className="stat-lbl">Spent</div><div className="stat-val red">{f(expEUR)}</div><div className="stat-sub">{lbl}</div></div>
+        <div className={'stat ' + (netEUR >= 0 ? 's-green' : 's-red')}><div className="stat-lbl">Net</div><div className={'stat-val ' + (netEUR >= 0 ? 'green' : 'red')}>{netEUR >= 0 ? '+' : ''}{f(netEUR)}</div><div className="stat-sub">In minus Out</div></div>
       </div>
 
-      {/* Year view extras */}
       {viewMode === 'year' && (
         <>
           <div className="card" style={{ marginBottom: 14 }}>
@@ -202,65 +144,42 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
                   </div>
                 ))}
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {monthlyData.map((d, i) => (
-                  <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 10, color: 'var(--muted)' }}>{d.m}</div>
-                ))}
-              </div>
+              <div style={{ display: 'flex', gap: 6 }}>{monthlyData.map((d, i) => <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 10, color: 'var(--muted)' }}>{d.m}</div>)}</div>
             </div>
           </div>
-
           <div className="card" style={{ marginBottom: 14 }}>
             <div className="card-head"><span className="card-title">Monthly breakdown</span><span className="card-meta">{selYear}</span></div>
             <div className="card-body" style={{ padding: 0 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ borderBottom: '0.5px solid var(--border)' }}>
-                    {['Month', 'Money in', 'Spent', 'Net'].map(h => (
-                      <th key={h} style={{ padding: '8px 16px', textAlign: h === 'Month' ? 'left' : 'right', color: 'var(--muted)', fontWeight: 500 }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
+                <thead><tr style={{ borderBottom: '0.5px solid var(--border)' }}>{['Month','Money in','Spent','Net'].map(h => <th key={h} style={{ padding: '8px 16px', textAlign: h === 'Month' ? 'left' : 'right', color: 'var(--muted)', fontWeight: 500 }}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {monthlyData.map((d, i) => {
-                    const hasData = d.exp > 0 || d.con > 0
-                    const net = d.con - d.exp
-                    return (
-                      <tr key={i} style={{ borderBottom: '0.5px solid var(--border)', opacity: hasData ? 1 : 0.3 }}>
-                        <td style={{ padding: '8px 16px', fontWeight: 500 }}>{d.label}</td>
-                        <td style={{ padding: '8px 16px', textAlign: 'right', color: 'var(--green)' }}>{d.con > 0 ? '+' + f(d.con) : '—'}</td>
-                        <td style={{ padding: '8px 16px', textAlign: 'right', color: 'var(--red)' }}>{d.exp > 0 ? f(d.exp) : '—'}</td>
-                        <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 500, color: net >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                          {hasData ? (net >= 0 ? '+' : '') + f(net) : '—'}
-                        </td>
-                      </tr>
-                    )
-                  })}
+                  {monthlyData.map((d, i) => { const hasData = d.exp > 0 || d.con > 0; const net = d.con - d.exp; return (
+                    <tr key={i} style={{ borderBottom: '0.5px solid var(--border)', opacity: hasData ? 1 : 0.3 }}>
+                      <td style={{ padding: '8px 16px', fontWeight: 500 }}>{d.label}</td>
+                      <td style={{ padding: '8px 16px', textAlign: 'right', color: 'var(--green)' }}>{d.con > 0 ? '+' + f(d.con) : '—'}</td>
+                      <td style={{ padding: '8px 16px', textAlign: 'right', color: 'var(--red)' }}>{d.exp > 0 ? f(d.exp) : '—'}</td>
+                      <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 500, color: net >= 0 ? 'var(--green)' : 'var(--red)' }}>{hasData ? (net >= 0 ? '+' : '') + f(net) : '—'}</td>
+                    </tr>
+                  )})}
                 </tbody>
-                <tfoot>
-                  <tr style={{ borderTop: '1px solid var(--border2)', background: 'var(--surface2)' }}>
-                    <td style={{ padding: '10px 16px', fontWeight: 600 }}>Total {selYear}</td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>+{f(conEUR)}</td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--red)', fontWeight: 600 }}>{f(expEUR)}</td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: netEUR >= 0 ? 'var(--green)' : 'var(--red)' }}>{netEUR >= 0 ? '+' : ''}{f(netEUR)}</td>
-                  </tr>
-                </tfoot>
+                <tfoot><tr style={{ borderTop: '1px solid var(--border2)', background: 'var(--surface2)' }}>
+                  <td style={{ padding: '10px 16px', fontWeight: 600 }}>Total {selYear}</td>
+                  <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>+{f(conEUR)}</td>
+                  <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--red)', fontWeight: 600 }}>{f(expEUR)}</td>
+                  <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: netEUR >= 0 ? 'var(--green)' : 'var(--red)' }}>{netEUR >= 0 ? '+' : ''}{f(netEUR)}</td>
+                </tr></tfoot>
               </table>
             </div>
           </div>
         </>
       )}
 
-      {/* Money In + Breakdown */}
       <div className="grid2" style={{ marginBottom: 14 }}>
         <div className="card">
-          <div className="card-head">
-            <span className="card-title">💰 Money in</span>
-            <span className="card-meta" style={{ color: 'var(--green)' }}>{f(conEUR)}</span>
-          </div>
+          <div className="card-head"><span className="card-title">💰 Money in</span><span className="card-meta" style={{ color: 'var(--green)' }}>{f(conEUR)}</span></div>
           <div className="card-body">
             {cons.length === 0 ? <div className="empty">No money in for {lbl}</div> :
-              [...cons].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6).map(c => (
+              [...cons].sort((a,b) => b.date.localeCompare(a.date)).slice(0,6).map(c => (
                 <div key={c.id} className="tx">
                   <div className="tx-icon" style={{ background: 'rgba(79,216,150,.12)', fontSize: 15 }}>↓</div>
                   <div className="tx-info">
@@ -292,9 +211,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
                     <span style={{ color: 'var(--muted)' }}>{r.label}</span>
                     <span style={{ fontWeight: 500, color: r.color }}>{f(r.val)}</span>
                   </div>
-                  <div className="bar-track">
-                    <div className="bar-fill" style={{ width: Math.round(r.val / maxIn * 100) + '%', background: r.color }} />
-                  </div>
+                  <div className="bar-track"><div className="bar-fill" style={{ width: Math.round(r.val/maxIn*100)+'%', background: r.color }} /></div>
                 </div>
               ))
             })()}
@@ -302,16 +219,12 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
         </div>
       </div>
 
-      {/* Recent expenses + By category */}
       <div className="grid2" style={{ marginBottom: 14 }}>
         <div className="card">
-          <div className="card-head">
-            <span className="card-title">Recent expenses</span>
-            <span className="card-meta">{exps.length} {viewMode === 'year' ? 'this year' : 'this month'}</span>
-          </div>
+          <div className="card-head"><span className="card-title">Recent expenses</span><span className="card-meta">{exps.length} {viewMode === 'year' ? 'this year' : 'this month'}</span></div>
           <div className="card-body">
             {exps.length === 0 ? <div className="empty">No expenses for {lbl}</div> :
-              [...exps].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6).map(e => (
+              [...exps].sort((a,b) => b.date.localeCompare(a.date)).slice(0,6).map(e => (
                 <div key={e.id} className="tx">
                   <div className="tx-icon">{CAT_EMOJI[e.category] || '📦'}</div>
                   <div className="tx-info">
@@ -335,9 +248,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
                     <span style={{ color: 'var(--muted)' }}>{CAT_EMOJI[cat] || ''} {cat}</span>
                     <span style={{ fontWeight: 500 }}>{f(eur)}</span>
                   </div>
-                  <div className="bar-track">
-                    <div className="bar-fill" style={{ width: Math.round(eur / maxCat * 100) + '%', background: 'var(--acc)' }} />
-                  </div>
+                  <div className="bar-track"><div className="bar-fill" style={{ width: Math.round(eur/maxCat*100)+'%', background: 'var(--acc)' }} /></div>
                 </div>
               ))
             }
@@ -345,7 +256,6 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
         </div>
       </div>
 
-      {/* Who paid */}
       <div className="grid2" style={{ marginBottom: 14 }}>
         <div className="card">
           <div className="card-head"><span className="card-title">Who paid</span><span className="card-meta">{lbl}</span></div>
@@ -355,44 +265,34 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
                   <div style={{ textAlign: 'center', flex: 1 }}>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{myName}</div>
-                    <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--acc)' }}>{f(youSpent + sharedSpent / 2)}</div>
+                    <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--acc)' }}>{f(youSpent + sharedSpent/2)}</div>
                   </div>
                   <div style={{ textAlign: 'center', flex: 1 }}>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{partnerName}</div>
-                    <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--blue)' }}>{f(partnerSpent + sharedSpent / 2)}</div>
+                    <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--blue)' }}>{f(partnerSpent + sharedSpent/2)}</div>
                   </div>
                 </div>
-                {[
-                  { label: `🧾 ${myName} paid`, val: youSpent, color: 'var(--acc)' },
-                  { label: '🤝 Joint', val: sharedSpent, color: 'var(--green)' },
-                  { label: `🤲 ${partnerName} paid`, val: partnerSpent, color: 'var(--blue)' },
-                ].map(row => (
-                  <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderBottom: '0.5px solid var(--border)' }}>
-                    <span style={{ color: 'var(--muted)' }}>{row.label}</span>
-                    <span style={{ fontWeight: 500, color: row.color }}>{f(row.val)}</span>
+                {[{label: myName + ' paid', val: youSpent, color:'var(--acc)'},{label:'Joint',val:sharedSpent,color:'var(--green)'},{label:partnerName+' paid',val:partnerSpent,color:'var(--blue)'}].map(r => (
+                  <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderBottom: '0.5px solid var(--border)' }}>
+                    <span style={{ color: 'var(--muted)' }}>{r.label}</span>
+                    <span style={{ fontWeight: 500, color: r.color }}>{f(r.val)}</span>
                   </div>
                 ))}
               </>
             )}
           </div>
         </div>
-
-        {/* Trips */}
         <div className="card">
           <div className="card-head"><span className="card-title">Trips</span><span className="card-meta">{trips.length} planned</span></div>
           <div className="card-body">
             {trips.length === 0 ? <div className="empty">No trips yet</div> :
-              trips.slice(0, 4).map(t => (
+              trips.slice(0,4).map(t => (
                 <div key={t.id} style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
                     <span style={{ fontWeight: 500 }}>✈️ {t.name}</span>
                     <span style={{ color: 'var(--blue)', fontWeight: 500 }}>{f(t.budget_eur)}</span>
                   </div>
-                  {(t.date_from || t.date_to) && (
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                      {t.date_from ? fmtDate(t.date_from) : ''}{t.date_from && t.date_to ? ' → ' : ''}{t.date_to ? fmtDate(t.date_to) : ''}
-                    </div>
-                  )}
+                  {(t.date_from || t.date_to) && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.date_from ? fmtDate(t.date_from) : ''}{t.date_from && t.date_to ? ' → ' : ''}{t.date_to ? fmtDate(t.date_to) : ''}</div>}
                 </div>
               ))
             }

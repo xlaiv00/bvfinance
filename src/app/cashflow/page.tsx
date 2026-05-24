@@ -15,18 +15,10 @@ export default async function CashflowPage() {
   const partnerProfile = allProfiles?.find((p: any) => p.id !== user.id)
   return (
     <div className="shell">
-      <Sidebar
-        inviteCode={(profile.households as any)?.invite_code}
-        myName={myProfile?.display_name}
-        partnerName={partnerProfile?.display_name}
-        householdId={hid}
-        userId={user.id}
-      />
+      <Sidebar inviteCode={(profile.households as any)?.invite_code} myName={myProfile?.display_name} partnerName={partnerProfile?.display_name} householdId={hid} userId={user.id} />
       <div className="main">
         <div className="topbar"><span className="page-heading">Cashflow</span></div>
-        <div className="content">
-          <CashflowClient householdId={hid} />
-        </div>
+        <div className="content"><CashflowClient householdId={hid} /></div>
       </div>
     </div>
   )

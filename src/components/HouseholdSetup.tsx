@@ -4,79 +4,61 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
 export default function HouseholdSetup({ userId }: { userId: string }) {
-  const [mode, setMode] = useState<'create' | 'join'>('create')
-  const [householdName, setHouseholdName] = useState('Our Finances')
-  const [inviteCode, setInviteCode] = useState('')
+  const [mode, setMode] = useState<'create'|'join'>('create')
+  const [name, setName] = useState('')
+  const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const router = useRouter()
   const supabase = createClient()
 
-  async function createHousehold() {
+  async function create() {
+    if (!name.trim()) return
     setLoading(true); setError('')
-    const { data, error } = await supabase
-      .from('households')
-      .insert({ name: householdName })
-      .select()
-      .single()
-    if (error || !data) { setError(error?.message || 'Failed'); setLoading(false); return }
-    await supabase.from('profiles').update({ household_id: data.id }).eq('id', userId)
-    router.refresh()
+    const inviteCode = Math.random().toString(36).slice(2,8).toUpperCase()
+    const { data: hh, error: hhErr } = await supabase.from('households').insert({ name: name.trim(), invite_code: inviteCode }).select().single()
+    if (hhErr) { setError(hhErr.message); setLoading(false); return }
+    const { error: pErr } = await supabase.from('profiles').update({ household_id: hh.id }).eq('id', userId)
+    if (pErr) { setError(pErr.message); setLoading(false); return }
+    router.push('/dashboard'); router.refresh()
   }
 
-  async function joinHousehold() {
+  async function join() {
+    if (!code.trim()) return
     setLoading(true); setError('')
-    const code = inviteCode.trim().toLowerCase()
-    const { data, error } = await supabase
-      .from('households')
-      .select()
-      .eq('invite_code', code)
-      .single()
-    if (error || !data) { setError('Invite code not found'); setLoading(false); return }
-    await supabase.from('profiles').update({ household_id: data.id }).eq('id', userId)
-    router.refresh()
+    const { data: hh } = await supabase.from('households').select('*').eq('invite_code', code.trim().toUpperCase()).single()
+    if (!hh) { setError('Invite code not found'); setLoading(false); return }
+    const { error: pErr } = await supabase.from('profiles').update({ household_id: hh.id }).eq('id', userId)
+    if (pErr) { setError(pErr.message); setLoading(false); return }
+    router.push('/dashboard'); router.refresh()
   }
 
   return (
-    <div className="auth-shell">
-      <div className="auth-card">
-        <div className="auth-title">together<span>.</span></div>
-        <div className="auth-sub">Set up your shared household</div>
-
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+      <div style={{ width: 360, background: 'var(--surface)', border: '0.5px solid var(--border)', borderRadius: 16, padding: 32 }}>
+        <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 6 }}>together<span style={{ color: 'var(--acc)' }}>.</span></div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 24 }}>Set up your household</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-          <button className="auth-btn" style={{ background: mode === 'create' ? 'var(--acc2)' : 'var(--surface2)', border: '0.5px solid var(--border2)' }}
-            onClick={() => setMode('create')}>Create new</button>
-          <button className="auth-btn" style={{ background: mode === 'join' ? 'var(--acc2)' : 'var(--surface2)', border: '0.5px solid var(--border2)' }}
-            onClick={() => setMode('join')}>Join existing</button>
+          {(['create','join'] as const).map(m => (
+            <button key={m} onClick={() => setMode(m)} style={{ flex: 1, padding: '8px', border: mode === m ? '0.5px solid var(--acc)' : '0.5px solid var(--border2)', borderRadius: 8, background: mode === m ? 'rgba(124,111,247,.1)' : 'transparent', color: mode === m ? 'var(--acc)' : 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 500 }}>
+              {m === 'create' ? 'Create new' : 'Join existing'}
+            </button>
+          ))}
         </div>
-
         {mode === 'create' ? (
           <>
-            <div className="auth-field">
-              <label>Household name</label>
-              <input value={householdName} onChange={e => setHouseholdName(e.target.value)} />
-            </div>
-            {error && <div className="auth-error">{error}</div>}
-            <button className="auth-btn" onClick={createHousehold} disabled={loading}>
-              {loading ? 'Creating…' : 'Create household'}
-            </button>
-            <div className="auth-sub" style={{ marginTop: 16, marginBottom: 0 }}>
-              After creating, share the invite code with your partner so they can join.
-            </div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Household name</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Viet & Bich" onKeyDown={e => e.key === 'Enter' && create()} style={{ width: '100%', padding: '10px 12px', border: '0.5px solid var(--border2)', borderRadius: 8, background: 'var(--surface2)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 13, outline: 'none', marginBottom: 16 }} />
+            <button onClick={create} disabled={loading} style={{ width: '100%', padding: '10px', background: 'var(--acc2)', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>{loading ? 'Creating...' : 'Create household'}</button>
           </>
         ) : (
           <>
-            <div className="auth-field">
-              <label>Invite code</label>
-              <input value={inviteCode} onChange={e => setInviteCode(e.target.value)}
-                placeholder="e.g. a1b2c3d4" style={{ letterSpacing: '.08em', fontFamily: 'monospace' }} />
-            </div>
-            {error && <div className="auth-error">{error}</div>}
-            <button className="auth-btn" onClick={joinHousehold} disabled={loading}>
-              {loading ? 'Joining…' : 'Join household'}
-            </button>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Invite code</label>
+            <input value={code} onChange={e => setCode(e.target.value)} placeholder="e.g. ABC123" onKeyDown={e => e.key === 'Enter' && join()} style={{ width: '100%', padding: '10px 12px', border: '0.5px solid var(--border2)', borderRadius: 8, background: 'var(--surface2)', color: 'var(--text)', fontFamily: 'inherit', fontSize: 13, outline: 'none', marginBottom: 16 }} />
+            <button onClick={join} disabled={loading} style={{ width: '100%', padding: '10px', background: 'var(--acc2)', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>{loading ? 'Joining...' : 'Join household'}</button>
           </>
         )}
+        {error && <div style={{ marginTop: 12, color: 'var(--red)', fontSize: 12 }}>{error}</div>}
       </div>
     </div>
   )

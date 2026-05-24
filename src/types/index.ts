@@ -1,5 +1,4 @@
-export type Currency = 'EUR' | 'CZK'
-export const EUR_CZK = 24.5
+export type Currency = 'EUR' | 'CZK' | 'USD' | 'VND'
 
 export const EXPENSE_CATEGORIES = [
   { value: 'Groceries', label: '🛒 Groceries' },
@@ -34,25 +33,38 @@ export const TRIP_CATEGORIES = [
 export const CAT_EMOJI: Record<string, string> = {
   Groceries: '🛒', Restaurants: '🍽️', Transport: '🚌', Household: '🏠',
   Travel: '✈️', Gifts: '🎁', Entertainment: '🎬', Health: '💊',
-  Utilities: '⚡', Other: '📦', Flights: '✈️', Hotels: '🏨',
-  Accommodation: '🏨', Food: '🍜', 'Food & Drinks': '🍽️', Activities: '🎡',
-  Shopping: '🛍️', 'Car Rental': '🚗', Insurance: '🛡️',
+  Utilities: '⚡', Other: '📦', Flights: '✈️', Accommodation: '🏨',
+  'Food & Drinks': '🍽️', Activities: '🎡', Shopping: '🛍️',
+  'Car Rental': '🚗', Insurance: '🛡️',
 }
 
-export function toEUR(amount: number, currency: Currency): number {
-  return currency === 'CZK' ? amount / EUR_CZK : amount
+export const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+export const MONTHS_S = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+const EUR_CZK = 24.5
+const USD_CZK = 22.8
+const VND_CZK = 0.000895
+
+export function toEUR(amount: number, cur: Currency): number {
+  if (cur === 'EUR') return amount
+  if (cur === 'CZK') return amount / EUR_CZK
+  if (cur === 'USD') return (amount * USD_CZK) / EUR_CZK
+  if (cur === 'VND') return (amount * VND_CZK) / EUR_CZK
+  return amount
 }
 
-export function fmtAmount(eur: number, displayCurrency: Currency): string {
-  if (displayCurrency === 'CZK') {
-    return 'Kč\u202f' + Math.round(eur * EUR_CZK).toLocaleString('cs-CZ')
-  }
+export function fmtAmount(eur: number, cur: Currency): string {
+  if (cur === 'EUR') return '€' + eur.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  if (cur === 'CZK') return Math.round(eur * EUR_CZK).toLocaleString('cs-CZ') + ' Kč'
   return '€' + eur.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-export function fmtRaw(amount: number, currency: Currency): string {
-  if (currency === 'CZK') return 'Kč\u202f' + Math.round(amount).toLocaleString('cs-CZ')
-  return '€' + Number(amount).toFixed(2)
+export function fmtRaw(amount: number, cur: string): string {
+  if (cur === 'CZK') return Math.round(amount).toLocaleString('cs-CZ') + ' Kč'
+  if (cur === 'EUR') return '€' + amount.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  if (cur === 'USD') return '$' + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  if (cur === 'VND') return Math.round(amount).toLocaleString('vi-VN') + ' ₫'
+  return amount + ' ' + cur
 }
 
 export function fmtDate(s: string): string {
@@ -67,90 +79,31 @@ export function fmtDateFull(s: string): string {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export function todayStr(): string {
-  return new Date().toISOString().split('T')[0]
-}
-
-export const MONTHS = ['January','February','March','April','May','June',
-  'July','August','September','October','November','December']
-export const MONTHS_S = ['Jan','Feb','Mar','Apr','May','Jun',
-  'Jul','Aug','Sep','Oct','Nov','Dec']
-
-export interface Household {
-  id: string
-  name: string
-  invite_code: string
-}
+export function todayStr(): string { return new Date().toISOString().split('T')[0] }
 
 export interface Expense {
-  id: string
-  household_id: string
-  description: string
-  amount: number
-  currency: Currency
-  amount_eur: number
-  date: string
-  category: string
-  paid_by: string
-  created_at: string
+  id: string; household_id: string; description: string
+  amount: number; currency: string; amount_eur: number
+  date: string; category: string; paid_by: string
 }
-
 export interface Contribution {
-  id: string
-  household_id: string
-  person: string
-  amount: number
-  currency: Currency
-  amount_eur: number
-  date: string
-  note?: string
-  created_at: string
+  id: string; household_id: string; person: string
+  amount: number; currency: string; amount_eur: number
+  date: string; note?: string
 }
-
 export interface SavingsGoal {
-  id: string
-  household_id: string
-  name: string
-  target_amount: number
-  currency: Currency
-  target_eur: number
-  emoji: string
-  created_at: string
+  id: string; household_id: string; name: string; emoji: string; target_eur: number
 }
-
 export interface SavingsDeposit {
-  id: string
-  goal_id: string
-  household_id: string
-  amount: number
-  currency: Currency
-  amount_eur: number
-  date: string
-  deposited_by: string
-  created_at: string
+  id: string; goal_id: string; amount_eur: number
 }
-
 export interface Trip {
-  id: string
-  household_id: string
-  name: string
-  budget: number
-  currency: Currency
-  budget_eur: number
-  date_from?: string
-  date_to?: string
-  created_at: string
+  id: string; household_id: string; name: string
+  budget: number; currency: string; budget_eur: number
+  date_from?: string; date_to?: string; created_at: string
 }
-
 export interface TripExpense {
-  id: string
-  trip_id: string
-  household_id: string
-  description: string
-  amount: number
-  currency: Currency
-  amount_eur: number
-  category: string
-  date: string
-  created_at: string
+  id: string; trip_id: string; household_id: string
+  description: string; amount: number; currency: string
+  amount_eur: number; category: string; date: string
 }
