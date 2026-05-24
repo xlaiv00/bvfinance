@@ -1,20 +1,13 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { fmtAmount, fmtRaw, fmtDate, MONTHS, MONTHS_S, CAT_EMOJI, toEUR, type Expense, type Contribution, type SavingsGoal, type SavingsDeposit, type Trip, type Currency } from '@/types'
+import { fmtAmount, fmtRaw, fmtDate, MONTHS, MONTHS_S, CAT_EMOJI, type Expense, type Contribution, type Trip, type Currency } from '@/types'
 
-interface Props {
-  householdId: string
-  myName: string
-  partnerName: string
-}
+interface Props { householdId: string; myName: string; partnerName: string }
 
 function getYears(arrs: { date?: string; created_at?: string }[][]) {
   const ys: number[] = [new Date().getFullYear()]
-  arrs.flat().forEach(x => {
-    const d = x.date || x.created_at
-    if (d) { const y = new Date(d).getFullYear(); if (!ys.includes(y)) ys.push(y) }
-  })
+  arrs.flat().forEach(x => { const d = x.date || x.created_at; if (d) { const y = new Date(d).getFullYear(); if (!ys.includes(y)) ys.push(y) } })
   return ys.sort()
 }
 function filterMonth<T extends { date: string }>(arr: T[], m: number, y: number) {
@@ -30,107 +23,79 @@ function activeMonthsOf(arr: { date: string }[], year: number) {
   return months
 }
 
+const CURRENCIES: Currency[] = ['EUR', 'CZK']
+
 export default function DashboardClient({ householdId, myName, partnerName }: Props) {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [contributions, setContributions] = useState<Contribution[]>([])
-  const [goals, setGoals] = useState<SavingsGoal[]>([])
-  const [deposits, setDeposits] = useState<SavingsDeposit[]>([])
   const [trips, setTrips] = useState<Trip[]>([])
   const [loading, setLoading] = useState(true)
-
-  const [cur, setCur] = useState<Currency>('EUR')
+  const [cur, setCur] = useState<Currency>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('together_default_currency') as Currency) || 'EUR'
+    }
+    return 'EUR'
+  })
   const [selYear, setSelYear] = useState(new Date().getFullYear())
   const [selMonth, setSelMonth] = useState(new Date().getMonth())
   const [viewMode, setViewMode] = useState<'month' | 'year'>('month')
-
   const supabase = createClient()
 
+  function setAndSaveCur(c: Currency) {
+    setCur(c)
+    localStorage.setItem('together_default_currency', c)
+  }
+
   const fetchAll = useCallback(async () => {
-    const [expRes, conRes, goalRes, depRes, tripRes] = await Promise.all([
+    const [expRes, conRes, tripRes] = await Promise.all([
       supabase.from('expenses').select('*').eq('household_id', householdId).order('date', { ascending: false }),
       supabase.from('contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }),
-      supabase.from('savings_goals').select('*').eq('household_id', householdId).order('created_at'),
-      supabase.from('savings_deposits').select('*').eq('household_id', householdId),
       supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false }),
     ])
     setExpenses(expRes.data || [])
     setContributions(conRes.data || [])
-    setGoals(goalRes.data || [])
-    setDeposits(depRes.data || [])
     setTrips(tripRes.data || [])
     setLoading(false)
   }, [householdId])
 
   useEffect(() => {
     fetchAll()
-
-    // Refetch when tab becomes visible again (e.g. switching back from Trips)
     const onVisible = () => { if (document.visibilityState === 'visible') fetchAll() }
-    document.addEventListener('visibilitychange', onVisible)
-
-    // Refetch when window gains focus
     const onFocus = () => fetchAll()
+    document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onFocus)
-
-    // Subscribe to real-time changes — refetch full list on any change
-    const channel = supabase
-      .channel('dashboard-realtime-' + householdId)
+    const channel = supabase.channel('dash-rt-' + householdId)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => {
-        supabase.from('expenses').select('*').eq('household_id', householdId).order('date', { ascending: false })
-          .then(({ data }) => { if (data) setExpenses(data) })
+        supabase.from('expenses').select('*').eq('household_id', householdId).order('date', { ascending: false }).then(({ data }) => { if (data) setExpenses(data) })
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'contributions' }, () => {
-        supabase.from('contributions').select('*').eq('household_id', householdId).order('date', { ascending: false })
-          .then(({ data }) => { if (data) setContributions(data) })
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'savings_goals' }, () => {
-        supabase.from('savings_goals').select('*').eq('household_id', householdId).order('created_at')
-          .then(({ data }) => { if (data) setGoals(data) })
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'savings_deposits' }, () => {
-        supabase.from('savings_deposits').select('*').eq('household_id', householdId)
-          .then(({ data }) => { if (data) setDeposits(data) })
+        supabase.from('contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }).then(({ data }) => { if (data) setContributions(data) })
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, () => {
-        supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false })
-          .then(({ data }) => { if (data) setTrips(data) })
+        supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false }).then(({ data }) => { if (data) setTrips(data) })
       })
       .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onFocus)
-    }
+    return () => { supabase.removeChannel(channel); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onFocus) }
   }, [householdId, fetchAll])
 
   const f = (eur: number) => fmtAmount(eur, cur)
-
   const years = getYears([expenses, contributions])
   const actMonths = activeMonthsOf([...expenses, ...contributions], selYear)
-
   const exps = viewMode === 'year' ? filterYear(expenses, selYear) : filterMonth(expenses, selMonth, selYear)
   const cons = viewMode === 'year' ? filterYear(contributions, selYear) : filterMonth(contributions, selMonth, selYear)
-
   const allConEUR = contributions.reduce((s, x) => s + x.amount_eur, 0)
   const allExpEUR = expenses.reduce((s, x) => s + x.amount_eur, 0)
   const conEUR = cons.reduce((s, x) => s + x.amount_eur, 0)
   const expEUR = exps.reduce((s, x) => s + x.amount_eur, 0)
   const netEUR = conEUR - expEUR
   const lbl = viewMode === 'year' ? String(selYear) : MONTHS[selMonth] + ' ' + selYear
-
   const cats: Record<string, number> = {}
   exps.forEach(e => { cats[e.category] = (cats[e.category] || 0) + e.amount_eur })
   const topCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 5)
   const maxCat = topCats[0]?.[1] || 1
-
   const youSpent = exps.filter(e => e.paid_by === 'you').reduce((s, e) => s + e.amount_eur, 0)
   const partnerSpent = exps.filter(e => e.paid_by === 'partner').reduce((s, e) => s + e.amount_eur, 0)
   const sharedSpent = exps.filter(e => e.paid_by === 'joint').reduce((s, e) => s + e.amount_eur, 0)
-
-  const totalSaved = deposits.reduce((s, d) => s + d.amount_eur, 0)
-  const totalGoalTarget = goals.reduce((s, g) => s + g.target_eur, 0)
-
   const monthlyData = MONTHS_S.map((m, i) => ({
     m, label: MONTHS[i],
     exp: filterMonth(expenses, i, selYear).reduce((s, x) => s + x.amount_eur, 0),
@@ -152,15 +117,23 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
           <div style={{ fontSize: 18, fontWeight: 500, letterSpacing: '-.01em' }}>Overview</div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{lbl}</div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => fetchAll()} style={{ background: 'var(--surface2)', border: '0.5px solid var(--border)', borderRadius: 7, padding: '3px 11px', fontSize: 12, color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit' }} title="Refresh data">↻ Refresh</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={() => fetchAll()} style={{ background: 'var(--surface2)', border: '0.5px solid var(--border)', borderRadius: 7, padding: '4px 10px', fontSize: 12, color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit' }}>↻</button>
           <div className="cur-toggle">
             <button className={`cur-btn ${viewMode === 'month' ? 'active' : ''}`} onClick={() => setViewMode('month')}>Month</button>
             <button className={`cur-btn ${viewMode === 'year' ? 'active' : ''}`} onClick={() => setViewMode('year')}>Year</button>
           </div>
-          <div className="cur-toggle">
-            <button className={`cur-btn ${cur === 'EUR' ? 'active' : ''}`} onClick={() => setCur('EUR')}>EUR</button>
-            <button className={`cur-btn ${cur === 'CZK' ? 'active' : ''}`} onClick={() => setCur('CZK')}>CZK</button>
+          {/* Default currency selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Currency</span>
+            <div className="cur-toggle">
+              {CURRENCIES.map(c => (
+                <button key={c} className={`cur-btn ${cur === c ? 'active' : ''}`} onClick={() => setAndSaveCur(c)}
+                  title={c === cur ? 'Default currency (saved)' : `Switch to ${c}`}>
+                  {c}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -193,7 +166,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
           <div className="stat-sub">All time</div>
         </div>
         <div className="stat s-green">
-          <div className="stat-lbl">Contributed</div>
+          <div className="stat-lbl">Money in</div>
           <div className="stat-val green">{f(conEUR)}</div>
           <div className="stat-sub">{lbl}</div>
         </div>
@@ -216,7 +189,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
             <div className="card-head">
               <span className="card-title">Month by month — {selYear}</span>
               <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--muted)' }}>
-                <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--green)', borderRadius: 2, marginRight: 4 }} />Contributed</span>
+                <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--green)', borderRadius: 2, marginRight: 4 }} />Money in</span>
                 <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--red)', borderRadius: 2, marginRight: 4 }} />Spent</span>
               </div>
             </div>
@@ -243,7 +216,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ borderBottom: '0.5px solid var(--border)' }}>
-                    {['Month', 'Contributed', 'Spent', 'Net'].map(h => (
+                    {['Month', 'Money in', 'Spent', 'Net'].map(h => (
                       <th key={h} style={{ padding: '8px 16px', textAlign: h === 'Month' ? 'left' : 'right', color: 'var(--muted)', fontWeight: 500 }}>{h}</th>
                     ))}
                   </tr>
@@ -278,7 +251,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
         </>
       )}
 
-      {/* Money In section */}
+      {/* Money In + Breakdown */}
       <div className="grid2" style={{ marginBottom: 14 }}>
         <div className="card">
           <div className="card-head">
@@ -292,7 +265,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
                   <div className="tx-icon" style={{ background: 'rgba(79,216,150,.12)', fontSize: 15 }}>↓</div>
                   <div className="tx-info">
                     <div className="tx-name">{c.note || (c.person === 'you' ? myName : partnerName)}</div>
-                    <div className="tx-meta">{c.person === 'you' ? myName : partnerName} · {c.note && c.note.startsWith('[CF]') ? 'Cashflow' : 'Contribution'}</div>
+                    <div className="tx-meta">{c.person === 'you' ? myName : partnerName} · {c.note?.startsWith('[CF]') ? 'Cashflow' : 'Contribution'}</div>
                   </div>
                   <div className="tx-date">{fmtDate(c.date)}</div>
                   <div className="tx-amt pos">{fmtRaw(c.amount, c.currency)}</div>
@@ -302,10 +275,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
           </div>
         </div>
         <div className="card">
-          <div className="card-head">
-            <span className="card-title">Money in breakdown</span>
-            <span className="card-meta">{lbl}</span>
-          </div>
+          <div className="card-head"><span className="card-title">Money in breakdown</span><span className="card-meta">{lbl}</span></div>
           <div className="card-body">
             {cons.length === 0 ? <div className="empty">No data for {lbl}</div> : (() => {
               const youIn = cons.filter(c => c.person === 'you').reduce((s,c) => s+c.amount_eur, 0)
@@ -332,7 +302,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
         </div>
       </div>
 
-      {/* Recent expenses + by category */}
+      {/* Recent expenses + By category */}
       <div className="grid2" style={{ marginBottom: 14 }}>
         <div className="card">
           <div className="card-head">
@@ -375,6 +345,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
         </div>
       </div>
 
+      {/* Who paid */}
       <div className="grid2" style={{ marginBottom: 14 }}>
         <div className="card">
           <div className="card-head"><span className="card-title">Who paid</span><span className="card-meta">{lbl}</span></div>
@@ -405,60 +376,29 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
             )}
           </div>
         </div>
-        <div className="card">
-          <div className="card-head"><span className="card-title">Savings goals</span><span className="card-meta">{goals.length} goals</span></div>
-          <div className="card-body">
-            {goals.length === 0 ? <div className="empty">No savings goals yet</div> : (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 12, borderBottom: '0.5px solid var(--border)' }}>
-                  <div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>Total saved</div>
-                    <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--green)' }}>{f(totalSaved)}</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>All targets</div>
-                    <div style={{ fontSize: 20, fontWeight: 500 }}>{f(totalGoalTarget)}</div>
-                  </div>
-                </div>
-                {goals.slice(0, 4).map(g => {
-                  const saved = deposits.filter(d => d.goal_id === g.id).reduce((s, d) => s + d.amount_eur, 0)
-                  const pct = Math.min(Math.round(saved / g.target_eur * 100), 100)
-                  return (
-                    <div key={g.id} style={{ marginBottom: 10 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                        <span style={{ fontWeight: 500 }}>{g.emoji} {g.name}</span>
-                        <span style={{ color: 'var(--muted)' }}>{f(saved)} / {f(g.target_eur)}</span>
-                      </div>
-                      <div className="bar-track">
-                        <div className="bar-fill" style={{ width: pct + '%', background: 'var(--green)' }} />
-                      </div>
-                    </div>
-                  )
-                })}
-              </>
-            )}
-          </div>
-        </div>
-      </div>
 
-      {trips.length > 0 && (
+        {/* Trips */}
         <div className="card">
           <div className="card-head"><span className="card-title">Trips</span><span className="card-meta">{trips.length} planned</span></div>
           <div className="card-body">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
-              {trips.slice(0, 3).map(t => (
-                <div key={t.id} style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 12px' }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>✈️ {t.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
-                    {t.date_from ? fmtDate(t.date_from) : ''}{t.date_from && t.date_to ? ' → ' : ''}{t.date_to ? fmtDate(t.date_to) : ''}
+            {trips.length === 0 ? <div className="empty">No trips yet</div> :
+              trips.slice(0, 4).map(t => (
+                <div key={t.id} style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                    <span style={{ fontWeight: 500 }}>✈️ {t.name}</span>
+                    <span style={{ color: 'var(--blue)', fontWeight: 500 }}>{f(t.budget_eur)}</span>
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--blue)', fontWeight: 500 }}>Budget: {f(t.budget_eur)}</div>
+                  {(t.date_from || t.date_to) && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                      {t.date_from ? fmtDate(t.date_from) : ''}{t.date_from && t.date_to ? ' → ' : ''}{t.date_to ? fmtDate(t.date_to) : ''}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
+              ))
+            }
           </div>
         </div>
-      )}
+      </div>
     </>
   )
 }
