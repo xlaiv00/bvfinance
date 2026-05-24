@@ -289,13 +289,13 @@ export default function TripsClient({ householdId, trips: init, tripExpenses: in
                       autoFocus
                       placeholder={String(trip.budget)}
                       onKeyDown={e => {
-                        if (e.key === 'Enter') updateBudget(trip.id, trip.currency)
+                        if (e.key === 'Enter') updateBudget(trip.id, trip.currency as Currency)
                         if (e.key === 'Escape') { setBudgetEditId(null); setBudgetVal('') }
                       }}
                       style={{ width: 100, fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '0.5px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', fontFamily: 'inherit' }}
                     />
                     <button
-                      onClick={() => updateBudget(trip.id, trip.currency)}
+                      onClick={() => updateBudget(trip.id, trip.currency as Currency)}
                       style={{ fontSize: 11, background: 'var(--acc2)', color: '#fff', border: 'none', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit' }}>
                       Save
                     </button>
