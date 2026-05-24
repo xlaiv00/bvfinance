@@ -6,7 +6,7 @@ const EUR_CZK = 24.5
 
 interface Month { id: string; name: string }
 interface Group { id: string; month_id: string; type: string; name: string; sort_order: number }
-interface Row { id: string; group_id: string; month_id: string; description: string; revolut: number; cash: number; wise: number; other: number; highlight: string; sort_order: number }
+interface Row { id: string; group_id: string; month_id: string; description: string; revolut: number; cash: number; wise: number; other: number; highlight: string; synced: boolean; sort_order: number }
 interface Note { id: string; month_id: string; label: string; amount: number; color: string; bold: boolean }
 
 export default function CashflowClient({ householdId }: { householdId: string }) {
@@ -110,7 +110,7 @@ export default function CashflowClient({ householdId }: { householdId: string })
   async function addRow(groupId: string) {
     if (!activeId) return
     const so = rows.filter(r => r.group_id === groupId).length
-    const { data } = await supabase.from('cf_rows').insert({ group_id: groupId, month_id: activeId, household_id: householdId, description: '', revolut: 0, cash: 0, wise: 0, other: 0, highlight: '', sort_order: so }).select().single()
+    const { data } = await supabase.from('cf_rows').insert({ group_id: groupId, month_id: activeId, household_id: householdId, description: '', revolut: 0, cash: 0, wise: 0, other: 0, highlight: '', synced: false, sort_order: so }).select().single()
     if (data) {
       setRows(p => [...p, data])
       setTimeout(() => { const els = document.querySelectorAll<HTMLInputElement>(`[data-group="${groupId}"] .desc-inp`); els[els.length-1]?.focus() }, 40)
@@ -122,9 +122,60 @@ export default function CashflowClient({ householdId }: { householdId: string })
     await supabase.from('cf_rows').update({ [field]: val }).eq('id', id)
   }
 
-  async function deleteRow(id: string) {
-    setRows(p => p.filter(r => r.id !== id))
-    await supabase.from('cf_rows').delete().eq('id', id)
+  async function deleteRow(row: Row, groupType: string) {
+    // Clean up any synced entry
+    if (row.synced) {
+      const total = (row.revolut||0)+(row.cash||0)+(row.wise||0)+(row.other||0)
+      if (groupType === 'out') {
+        await supabase.from('expenses').delete()
+          .eq('household_id', householdId)
+          .eq('description', '[CF] ' + row.description)
+      } else {
+        await supabase.from('contributions').delete()
+          .eq('household_id', householdId)
+          .eq('note', '[CF] ' + row.description)
+      }
+    }
+    setRows(p => p.filter(r => r.id !== row.id))
+    await supabase.from('cf_rows').delete().eq('id', row.id)
+  }
+
+  async function toggleSync(row: Row, groupType: string) {
+    const newSynced = !row.synced
+    const total = (row.revolut||0)+(row.cash||0)+(row.wise||0)+(row.other||0)
+    setRows(p => p.map(r => r.id === row.id ? { ...r, synced: newSynced } : r))
+    await supabase.from('cf_rows').update({ synced: newSynced }).eq('id', row.id)
+
+    const today = new Date().toISOString().split('T')[0]
+    if (newSynced) {
+      if (groupType === 'out') {
+        // Mirror to expenses
+        await supabase.from('expenses').insert({
+          household_id: householdId,
+          description: '[CF] ' + (row.description || 'Cashflow expense'),
+          amount: total, currency: 'CZK', amount_eur: total / EUR_CZK,
+          category: 'Other', paid_by: 'joint', date: today,
+        })
+      } else {
+        // Mirror to contributions
+        await supabase.from('contributions').insert({
+          household_id: householdId,
+          person: 'you', amount: total, currency: 'CZK',
+          amount_eur: total / EUR_CZK, date: today,
+          note: '[CF] ' + (row.description || 'Cashflow income'),
+        })
+      }
+    } else {
+      if (groupType === 'out') {
+        await supabase.from('expenses').delete()
+          .eq('household_id', householdId)
+          .eq('description', '[CF] ' + row.description)
+      } else {
+        await supabase.from('contributions').delete()
+          .eq('household_id', householdId)
+          .eq('note', '[CF] ' + row.description)
+      }
+    }
   }
 
   async function cycleHL(id: string, cur: string) {
@@ -159,7 +210,7 @@ export default function CashflowClient({ householdId }: { householdId: string })
   const descCell: React.CSSProperties = { background: 'transparent', border: 'none', fontFamily: 'inherit', fontSize: 12, color: 'var(--text)', outline: 'none', width: '100%', padding: '6px 10px' }
 
   // Column headers for the table
-  const COL = '1fr 100px 100px 100px 100px 110px 36px'
+  const COL = '1fr 100px 100px 100px 100px 110px 52px 36px'
 
   function GroupSection({ g, isIn }: { g: Group; isIn: boolean }) {
     const gRows = rows.filter(r => r.group_id === g.id)
@@ -182,6 +233,7 @@ export default function CashflowClient({ householdId }: { householdId: string })
           <div style={{ padding: '7px 8px', textAlign: 'right', fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>Wise</div>
           <div style={{ padding: '7px 8px', textAlign: 'right', fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>Other</div>
           <div style={{ padding: '7px 8px', textAlign: 'right', fontSize: 12, fontWeight: 700, color: isIn ? 'var(--green)' : 'var(--red)', alignSelf: 'center' }}>{fmtTotal(total)}</div>
+          <div style={{ padding: '7px 4px', textAlign: 'center', fontSize: 10, color: 'var(--muted)', alignSelf: 'center' }} title="Sync to dashboard">Dash</div>
           <button onClick={() => deleteGroup(g.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 11, opacity: .4 }} onMouseOver={e => (e.currentTarget.style.opacity='1')} onMouseOut={e => (e.currentTarget.style.opacity='.4')}>✕</button>
         </div>
 
@@ -202,11 +254,19 @@ export default function CashflowClient({ householdId }: { householdId: string })
             <div style={{ textAlign: 'right', padding: '6px 8px', fontSize: 12, fontWeight: 500, color: isIn ? 'var(--green)' : rowTotal(row) > 0 ? 'var(--red)' : 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
               {rowTotal(row) > 0 ? fmt(rowTotal(row)) : ''}
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <button
+                onClick={() => toggleSync(row, g.type)}
+                title={row.synced ? 'Remove from dashboard' : 'Add to dashboard'}
+                style={{ width: 28, height: 16, borderRadius: 8, border: 'none', cursor: 'pointer', padding: 0, background: row.synced ? 'var(--acc)' : 'var(--faint)', position: 'relative', transition: 'background .2s', display: 'block' }}>
+                <span style={{ position: 'absolute', top: 2, left: row.synced ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left .2s', display: 'block' }} />
+              </button>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
               <button onClick={() => cycleHL(row.id, row.highlight)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: row.highlight||'var(--faint)', border: '1.5px solid var(--border2)', display: 'inline-block' }} />
               </button>
-              <button onClick={() => deleteRow(row.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 11, opacity: .4 }} onMouseOver={e => (e.currentTarget.style.opacity='1')} onMouseOut={e => (e.currentTarget.style.opacity='.4')}>✕</button>
+              <button onClick={() => deleteRow(row, g.type)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 11, opacity: .4 }} onMouseOver={e => (e.currentTarget.style.opacity='1')} onMouseOut={e => (e.currentTarget.style.opacity='.4')}>✕</button>
             </div>
           </div>
         ))}
