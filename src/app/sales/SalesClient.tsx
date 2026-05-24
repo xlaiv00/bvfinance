@@ -61,7 +61,7 @@ export default function SalesClient({ householdId }: { householdId: string }) {
   function profit(s: Sale) { return (s.revenue || 0) - totalCost(s) }
 
   const months = sales.map(s => s.date?.slice(0, 7)).filter((m): m is string => Boolean(m)).filter((m, i, a) => a.indexOf(m) === i).sort().reverse()
-
+  const filtered = filterMonth === 'all' ? sales : sales.filter(s => s.date?.startsWith(filterMonth))
 
   const totalRevenue = filtered.reduce((sum, s) => sum + (s.revenue || 0), 0)
   const totalCostAll = filtered.reduce((sum, s) => sum + totalCost(s), 0)
