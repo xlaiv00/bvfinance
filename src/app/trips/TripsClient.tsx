@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { toast } from '@/components/ToastProvider'
 import { createClient } from '@/lib/supabase/client'
 import { fmtAmount, fmtRaw, fmtDate, toEUR, todayStr, type Trip, type TripExpense, type Currency } from '@/types'
 
