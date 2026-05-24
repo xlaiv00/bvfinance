@@ -278,6 +278,61 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
         </>
       )}
 
+      {/* Money In section */}
+      <div className="grid2" style={{ marginBottom: 14 }}>
+        <div className="card">
+          <div className="card-head">
+            <span className="card-title">💰 Money in</span>
+            <span className="card-meta" style={{ color: 'var(--green)' }}>{f(conEUR)}</span>
+          </div>
+          <div className="card-body">
+            {cons.length === 0 ? <div className="empty">No money in for {lbl}</div> :
+              [...cons].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6).map(c => (
+                <div key={c.id} className="tx">
+                  <div className="tx-icon" style={{ background: 'rgba(79,216,150,.12)', fontSize: 15 }}>↓</div>
+                  <div className="tx-info">
+                    <div className="tx-name">{c.note || (c.person === 'you' ? myName : partnerName)}</div>
+                    <div className="tx-meta">{c.person === 'you' ? myName : partnerName} · {c.note && c.note.startsWith('[CF]') ? 'Cashflow' : 'Contribution'}</div>
+                  </div>
+                  <div className="tx-date">{fmtDate(c.date)}</div>
+                  <div className="tx-amt pos">{fmtRaw(c.amount, c.currency)}</div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-head">
+            <span className="card-title">Money in breakdown</span>
+            <span className="card-meta">{lbl}</span>
+          </div>
+          <div className="card-body">
+            {cons.length === 0 ? <div className="empty">No data for {lbl}</div> : (() => {
+              const youIn = cons.filter(c => c.person === 'you').reduce((s,c) => s+c.amount_eur, 0)
+              const partnerIn = cons.filter(c => c.person === 'partner').reduce((s,c) => s+c.amount_eur, 0)
+              const cfIn = cons.filter(c => c.note?.startsWith('[CF]')).reduce((s,c) => s+c.amount_eur, 0)
+              const maxIn = Math.max(youIn, partnerIn, cfIn, 1)
+              return [
+                { label: myName, val: youIn, color: 'var(--acc)' },
+                { label: partnerName, val: partnerIn, color: 'var(--blue)' },
+                { label: 'From cashflow', val: cfIn, color: 'var(--green)' },
+              ].filter(r => r.val > 0).map(r => (
+                <div key={r.label} style={{ marginBottom: 11 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                    <span style={{ color: 'var(--muted)' }}>{r.label}</span>
+                    <span style={{ fontWeight: 500, color: r.color }}>{f(r.val)}</span>
+                  </div>
+                  <div className="bar-track">
+                    <div className="bar-fill" style={{ width: Math.round(r.val / maxIn * 100) + '%', background: r.color }} />
+                  </div>
+                </div>
+              ))
+            })()}
+          </div>
+        </div>
+      </div>
+
+      {/* Recent expenses + by category */}
       <div className="grid2" style={{ marginBottom: 14 }}>
         <div className="card">
           <div className="card-head">
