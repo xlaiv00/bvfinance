@@ -146,21 +146,41 @@ export default function TripsClient({ householdId, trips: init, tripExpenses: in
   }
 
   async function deleteTrip(id: string) {
+    // Get all trip expenses first so we can clean up mirrored main expenses
+    const trip = trips.find(t => t.id === id)
+    const tripExps = allExp.filter(e => e.trip_id === id)
+    
+    // Delete mirrored entries from main expenses table
+    if (trip && tripExps.length > 0) {
+      for (const exp of tripExps) {
+        await supabase.from('expenses')
+          .delete()
+          .eq('household_id', householdId)
+          .eq('description', '[' + trip.name + '] ' + exp.description)
+          .eq('date', exp.date)
+      }
+    }
+    
+    // Delete the trip itself (cascades to trip_expenses in DB)
     await supabase.from('trips').delete().eq('id', id)
     setTrips(prev => prev.filter(t => t.id !== id))
     setAllExp(prev => prev.filter(e => e.trip_id !== id))
     if (openId === id) setOpenId(null)
+    toast(`Trip "${trip?.name}" deleted — expenses removed from dashboard`, 'success')
   }
 
   async function deleteExpense(exp: TripExpense, tripName: string) {
+    // Remove from trip_expenses
     await supabase.from('trip_expenses').delete().eq('id', exp.id)
-    // Remove from main expenses too
+    // Remove mirrored entry from main expenses
     await supabase.from('expenses')
       .delete()
       .eq('household_id', householdId)
       .eq('description', '[' + tripName + '] ' + exp.description)
       .eq('date', exp.date)
+      .eq('amount', exp.amount)
     setAllExp(prev => prev.filter(e => e.id !== exp.id))
+    toast('Expense deleted', 'success')
   }
 
   return (

@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import Timeline from '@/components/Timeline'
 import { createClient } from '@/lib/supabase/client'
+import { toast } from '@/components/ToastProvider'
 import { EXPENSE_CATEGORIES, CAT_EMOJI, fmtAmount, fmtRaw, fmtDate, toEUR, todayStr, MONTHS, type Expense, type Currency } from '@/types'
 
 function getYears(arr: { date: string }[]) {
@@ -61,8 +62,19 @@ export default function ExpensesClient({ householdId, expenses: initial, myName,
   }
 
   async function del(id: string) {
-    await supabase.from('expenses').delete().eq('id', id)
+    const expense = expenses.find(e => e.id === id)
+    if (!expense) return
     setExpenses(prev => prev.filter(x => x.id !== id))
+    await supabase.from('expenses').delete().eq('id', id)
+    toast('Expense deleted', 'undo', async () => {
+      const { data } = await supabase.from('expenses').insert({
+        household_id: householdId, description: expense.description,
+        amount: expense.amount, currency: expense.currency,
+        amount_eur: expense.amount_eur, date: expense.date,
+        category: expense.category, paid_by: expense.paid_by
+      }).select().single()
+      if (data) setExpenses(prev => [data, ...prev].sort((a,b) => b.date.localeCompare(a.date)))
+    })
   }
 
   const cats: Record<string, number> = {}

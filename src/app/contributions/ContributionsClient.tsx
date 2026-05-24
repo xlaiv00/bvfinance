@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import Timeline from '@/components/Timeline'
 import { createClient } from '@/lib/supabase/client'
+import { toast } from '@/components/ToastProvider'
 import { fmtAmount, fmtRaw, fmtDateFull, toEUR, todayStr, MONTHS, type Contribution, type Currency } from '@/types'
 
 function getYears(arr: { date: string }[]) {
@@ -40,8 +41,17 @@ export default function ContributionsClient({ householdId, contributions: initia
   }
 
   async function del(id: string) {
-    await supabase.from('contributions').delete().eq('id', id)
+    const item = contributions.find(c => c.id === id)
+    if (!item) return
     setContributions(prev => prev.filter(x => x.id !== id))
+    await supabase.from('contributions').delete().eq('id', id)
+    toast('Contribution deleted', 'undo', async () => {
+      const { data } = await supabase.from('contributions').insert({
+        household_id: householdId, person: item.person, amount: item.amount,
+        currency: item.currency, amount_eur: item.amount_eur, date: item.date, note: item.note
+      }).select().single()
+      if (data) setContributions(prev => [data, ...prev].sort((a,b) => b.date.localeCompare(a.date)))
+    })
   }
 
   return (

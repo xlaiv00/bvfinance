@@ -12,6 +12,7 @@ const NAV = [
   { href: '/savings', label: 'Savings', icon: '🐷' },
   { href: '/trips', label: 'Trips', icon: '✈️' },
   { href: '/cashflow', label: 'Cashflow', icon: '📊' },
+  { href: '/sales', label: 'Watch Sales', icon: '⌚' },
 ]
 
 interface Props {
