@@ -1,7 +1,8 @@
 'use client'
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { fmtCur, fmtDate, fmtDisplay, toCZK, today, TRIP_CATS, CAT_EMOJI } from '@/types'
+import { fmtDate, fmtDisplay, today, TRIP_CATS, CAT_EMOJI } from '@/types'
+import { useCurrencyRates, toCZKr, fmtR } from '@/hooks/useCurrencyRates'
 
 type Cur = 'CZK'|'EUR'
 interface Trip { id:string; name:string; budget_czk:number; budget_currency:string; date_from?:string; date_to?:string; created_at:string }
@@ -28,7 +29,8 @@ export default function TripsClient({ householdId, myName, partnerName, initTrip
   // Expense form per trip
   const [forms, setForms] = useState<Record<string,any>>({})
   const supabase = createClient()
-  const f = (czk: number) => fmtCur(czk, cur)
+  const rates = useCurrencyRates()
+  const f = (czk: number) => fmtR(czk, cur, rates)
   const getForm = (id: string) => forms[id] || { desc:'', amt:'', cur:'CZK', cat:'Food & Drinks', date:today(), who:'joint' }
   const patchForm = (id: string, patch: any) => setForms((p: any) => ({ ...p, [id]: { ...getForm(id), ...patch } }))
   const getTab = (id: string) => tabMap[id] || 'overview'
@@ -37,7 +39,7 @@ export default function TripsClient({ householdId, myName, partnerName, initTrip
   async function createTrip() {
     if (!tName||!tBudget) return
     setLoading(true)
-    const b = parseFloat(tBudget); const czk = toCZK(b, tCur)
+    const b = parseFloat(tBudget); const czk = toCZKr(b, tCur, rates)
     const { data } = await supabase.from('trips').insert({ household_id:householdId, name:tName, budget_czk:czk, budget_currency:tCur, date_from:tFrom||null, date_to:tTo||null }).select().single()
     if (data) { setTrips((p: Trip[]) => [data, ...p]); setOpenId(data.id); setTab(data.id,'expenses'); setTName(''); setTBudget('') }
     setLoading(false)
@@ -45,7 +47,7 @@ export default function TripsClient({ householdId, myName, partnerName, initTrip
 
   async function updateBudget(tripId: string, tripCur: string) {
     const b = parseFloat(newBudget); if (!b||b<=0) { setEditBudgetId(null); return }
-    const czk = toCZK(b, tripCur as Cur)
+    const czk = toCZKr(b, tripCur as Cur, rates)
     await supabase.from('trips').update({ budget_czk:czk, budget_currency:tripCur }).eq('id',tripId)
     setTrips((p: Trip[]) => p.map(t => t.id===tripId ? { ...t, budget_czk:czk } : t))
     setEditBudgetId(null); setNewBudget('')
@@ -55,7 +57,7 @@ export default function TripsClient({ householdId, myName, partnerName, initTrip
     const form = getForm(tripId)
     if (!form.desc||!form.amt) return
     setLoading(true)
-    const amt = parseFloat(form.amt); const czk = toCZK(amt, form.cur)
+    const amt = parseFloat(form.amt); const czk = toCZKr(amt, form.cur, rates)
     const { data } = await supabase.from('trip_expenses').insert({ trip_id:tripId, household_id:householdId, description:form.desc, amount_czk:czk, display_amount:amt, display_currency:form.cur, category:form.cat, date:form.date }).select().single()
     if (data) {
       setExps((p: TripExp[]) => [data, ...p])

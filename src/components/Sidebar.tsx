@@ -7,7 +7,7 @@ import { useEffect, useState, useRef } from 'react'
 
 const NAV = [
   { section: null, href: '/dashboard', label: 'Dashboard', icon: '⊞' },
-  { section: 'Personal', href: '/household', label: 'Household', icon: '🏠' },
+  { section: 'Personal', href: '/household', label: 'Finances', icon: '💳' },
   { section: null, href: '/trips', label: 'Trips', icon: '✈️' },
   { section: 'Business', href: '/business', label: 'Watch Business', icon: '⌚' },
   { section: 'Other', href: '/settings', label: 'Settings', icon: '⚙️' },

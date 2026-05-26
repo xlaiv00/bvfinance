@@ -17,7 +17,7 @@ export default async function Page() {
     <div className="shell">
       <Sidebar inviteCode={(profile.households as any)?.invite_code} myName={me?.display_name} partnerName={partner?.display_name} householdId={hid} userId={user.id} />
       <div className="main">
-        <div className="topbar"><span className="page-title">Household</span></div>
+        <div className="topbar"><span className="page-title">Finances</span></div>
         <div className="content"><HouseholdClient householdId={hid} myName={me?.display_name || 'You'} partnerName={partner?.display_name || 'Partner'} /></div>
       </div>
     </div>

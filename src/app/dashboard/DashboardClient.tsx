@@ -1,7 +1,8 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { fmtCur, fmtDisplay, fmtDate, MONTHS, MONTHS_S } from '@/types'
+import { fmtDate, MONTHS, MONTHS_S } from '@/types'
+import { useCurrencyRates, fmtR } from '@/hooks/useCurrencyRates'
 
 interface HHEntry { id:string; type:string; description:string; amount_czk:number; display_amount:number; display_currency:string; category:string; person:string; date:string; source:string }
 interface BizSale { id:string; date:string; revenue_czk:number; watch_cost_czk:number; shipping_czk:number; ads_czk:number }
@@ -19,9 +20,10 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
   const [view, setView] = useState<'month'|'year'>('month')
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
+  const rates = useCurrencyRates()
 
   function saveCur(c: Cur) { setCur(c); localStorage.setItem('cur', c) }
-  function f(czk: number) { return fmtCur(czk, cur) }
+  function f(czk: number) { return fmtR(czk, cur, rates) }
 
   const fetchAll = useCallback(async () => {
     const [e, s, t] = await Promise.all([
@@ -220,7 +222,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
                   <div className="tx-meta">{e.category} · {e.person==='you'?myName:e.person==='partner'?partnerName:'Joint'}</div>
                 </div>
                 <div className="tx-date">{fmtDate(e.date)}</div>
-                <div className={'tx-amt '+(e.type==='income'?'pos':'neg')}>{fmtDisplay(e.display_amount, e.display_currency)}</div>
+                <div className={'tx-amt '+(e.type==='income'?'pos':'neg')}>{fmtR(e.amount_czk, cur, rates)}</div>
               </div>
             ))}
           </div>

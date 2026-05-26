@@ -2,12 +2,13 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fmtCur, fromCZK, toCZK, today } from '@/types'
+import { useCurrencyRates, toCZKr, fromCZKr, fmtR } from '@/hooks/useCurrencyRates'
 
 const RATES: Record<string,number> = { CZK:1, EUR:24.5, USD:22.8, VND:0.000895 }
 const CURS = ['CZK','EUR','USD','VND'] as const
 type Cur = typeof CURS[number]
 
-function fmtC(czk: number, c: Cur) { return fmtCur(czk, c as any) }
+function fmtC(czk: number, c: string) { return fmtR(czk, c, rates) }
 function fmtOrig(czk: number, c: string) {
   const v = czk / (RATES[c]||1)
   if (c==='VND') return Math.round(v).toLocaleString('vi-VN') + ' ₫'
@@ -16,8 +17,8 @@ function fmtOrig(czk: number, c: string) {
   if (c==='USD') return '$' + v.toFixed(2)
   return v.toFixed(2)
 }
-function tc(a: number, c: string) { return a * (RATES[c]||1) }
-function fc(czk: number, c: string) { return czk / (RATES[c]||1) }
+function tc(a: number, c: string) { return toCZKr(a, c, rates) }
+function fc(czk: number, c: string) { return fromCZKr(czk, c, rates) }
 function pc(czk: number) { return czk>0?'var(--green)':czk<0?'var(--red)':'var(--muted)' }
 
 interface Sale { id:string; date:string; customer:string; watch_name:string; revenue_czk:number; revenue_cur:string; watch_cost_czk:number; watch_cost_cur:string; shipping_czk:number; shipping_cur:string; ads_czk:number; ads_cur:string; notes:string }
@@ -46,6 +47,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
   const [iAsking, setIAsking] = useState(''); const [iAskingCur, setIAskingCur] = useState<Cur>('CZK')
   const [iStatus, setIStatus] = useState('in_stock'); const [iNotes, setINotes] = useState(''); const [iDate, setIDate] = useState(today())
   const supabase = createClient()
+  const rates = useCurrencyRates()
 
   useEffect(() => { load() }, [])
   async function load() {
@@ -128,6 +130,55 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
     setInv(p=>p.filter(i=>i.id!==id))
   }
 
+  // Quick sell from inventory
+  const [sellInv, setSellInv] = useState<Inv|null>(null)
+  const [sellCustomer, setSellCustomer] = useState('')
+  const [sellRevenue, setSellRevenue] = useState('')
+  const [sellRevCur, setSellRevCur] = useState<Cur>('CZK')
+  const [sellDate, setSellDate] = useState(today())
+  const [sellAds, setSellAds] = useState('')
+  const [sellAdsCur, setSellAdsCur] = useState<Cur>('CZK')
+  const [sellShipping, setSellShipping] = useState('')
+  const [sellShipCur, setSellShipCur] = useState<Cur>('CZK')
+
+  function openSell(item: Inv) {
+    setSellInv(item)
+    setSellCustomer('')
+    setSellRevenue(item.asking_czk > 0 ? fc(item.asking_czk, item.asking_cur).toFixed(item.asking_cur==='VND'?0:2).replace(/\.00$/,'') : '')
+    setSellRevCur(item.asking_cur as Cur)
+    setSellAds(''); setSellShipping(''); setSellDate(today())
+  }
+
+  async function confirmSell() {
+    if (!sellInv || !sellRevenue) return
+    setLoading(true)
+    const revCZK = tc(parseFloat(sellRevenue)||0, sellRevCur)
+    const shipCZK = tc(parseFloat(sellShipping)||0, sellShipCur)
+    const adsCZK = tc(parseFloat(sellAds)||0, sellAdsCur)
+    const profit = revCZK - sellInv.purchase_czk - shipCZK - adsCZK
+
+    // 1. Create sale record
+    const { data: saleData } = await supabase.from('biz_sales').insert({
+      household_id: householdId,
+      date: sellDate,
+      customer: sellCustomer || 'Unknown',
+      watch_name: sellInv.watch_name,
+      revenue_czk: revCZK, revenue_cur: sellRevCur,
+      watch_cost_czk: sellInv.purchase_czk, watch_cost_cur: sellInv.purchase_cur,
+      shipping_czk: shipCZK, shipping_cur: sellShipCur,
+      ads_czk: adsCZK, ads_cur: sellAdsCur,
+      notes: sellInv.notes || ''
+    }).select().single()
+    if (saleData) setSales(p => [saleData as Sale, ...p])
+
+    // 2. Mark inventory as sold
+    await supabase.from('biz_inventory').update({ status: 'sold' }).eq('id', sellInv.id)
+    setInv(p => p.map(i => i.id === sellInv!.id ? { ...i, status: 'sold' } : i))
+
+    setSellInv(null)
+    setLoading(false)
+  }
+
   const INP: React.CSSProperties = { background:'var(--surface2)', border:'0.5px solid var(--border2)', borderRadius:8, padding:'8px 10px', fontSize:13, color:'var(--text)', fontFamily:'inherit', outline:'none', width:'100%' }
   const fRev = tc(parseFloat(form.revenue)||0,form.revenue_cur)
   const fCost = tc(parseFloat(form.watch_cost)||0,form.watch_cost_cur)+tc(parseFloat(form.shipping)||0,form.shipping_cur)+tc(parseFloat(form.ads)||0,form.ads_cur)
@@ -173,6 +224,12 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
           </div>
         </div>
 
+        <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:10 }}>
+          <div className="rates-badge">
+            <span className={'dot'+(rates.loading?' loading':'')} />
+            {rates.loading ? 'Fetching rates...' : `Live · 1 EUR = ${rates.EUR_CZK.toFixed(2)} Kč · 1 USD = ${rates.USD_CZK.toFixed(2)} Kč · 1M VND = ${(rates.VND_CZK*1000000).toFixed(2)} Kč`}
+          </div>
+        </div>
         <div className="g4" style={{ marginBottom:14 }}>
           {[{l:'Revenue',v:totRev,c:'var(--green)'},{l:'Total cost',v:totCost,c:'var(--red)'},{l:'Profit',v:totProfit,c:pc(totProfit)},{l:'Margin',v:null,d:margin+'%',c:pc(totProfit)}].map(s=>(
             <div key={s.l} className="stat" style={{ padding:'12px 16px' }}>
@@ -279,9 +336,12 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
                 ))}
               </div>
             </div>
-            <div className="card"><div className="card-head"><span className="card-title">Rates to CZK</span></div>
+            <div className="card"><div className="card-head"><span className="card-title">Live rates</span><span style={{ fontSize:10, color:'var(--green)', fontWeight:600 }}>LIVE</span></div>
               <div style={{ padding:'4px 0' }}>
-                {['EUR','USD','VND'].map(c=><div key={c} style={{ display:'flex', justifyContent:'space-between', padding:'5px 16px', fontSize:12 }}><span style={{ color:'var(--muted)' }}>1 {c}</span><span style={{ fontWeight:500 }}>{RATES[c]} Kč</span></div>)}
+                <div style={{ padding:'5px 16px', fontSize:12, display:'flex', justifyContent:'space-between' }}><span style={{ color:'var(--muted)' }}>1 EUR</span><span style={{ fontWeight:600 }}>{rates.EUR_CZK.toFixed(2)} Kč</span></div>
+                <div style={{ padding:'5px 16px', fontSize:12, display:'flex', justifyContent:'space-between' }}><span style={{ color:'var(--muted)' }}>1 USD</span><span style={{ fontWeight:600 }}>{rates.USD_CZK.toFixed(2)} Kč</span></div>
+                <div style={{ padding:'5px 16px', fontSize:12, display:'flex', justifyContent:'space-between' }}><span style={{ color:'var(--muted)' }}>1M VND</span><span style={{ fontWeight:600 }}>{(rates.VND_CZK*1000000).toFixed(2)} Kč</span></div>
+                {rates.lastUpdated!=='fallback'&&<div style={{ padding:'4px 16px 8px', fontSize:10, color:'var(--muted)' }}>Updated {rates.lastUpdated}</div>}
               </div>
             </div>
           </div>
@@ -427,13 +487,102 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
                   <td style={{ padding:'9px 12px', textAlign:'right' }}>
                     {item.asking_czk>0&&item.purchase_czk>0?<><div style={{ fontWeight:500, color:pc(pot) }}>{fmtC(pot,'CZK')}</div><div style={{ fontSize:10, color:pm>=30?'var(--green)':pm>=15?'var(--gold)':'var(--red)' }}>{pm}%</div></>:'—'}
                   </td>
-                  <td style={{ padding:'9px 8px' }}><button onClick={e=>{e.stopPropagation();delInv(item.id)}} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--faint)', fontSize:13 }}>✕</button></td>
+                  <td style={{ padding:'9px 8px', textAlign:'right' }}>
+                    <div style={{ display:'flex', gap:6, justifyContent:'flex-end' }}>
+                      {item.status !== 'sold' && (
+                        <button onClick={e=>{e.stopPropagation();openSell(item)}} style={{ background:'var(--green)', border:'none', color:'#fff', borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:500, cursor:'pointer', fontFamily:'inherit', whiteSpace:'nowrap' }}>
+                          💰 Sell
+                        </button>
+                      )}
+                      <button onClick={e=>{e.stopPropagation();delInv(item.id)}} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--faint)', fontSize:13 }}>✕</button>
+                    </div>
+                  </td>
                 </tr>
               })}
             </tbody>
           </table>
         </div></div>
       </>}
+
+      {/* ─── QUICK SELL MODAL ─── */}
+      {sellInv && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
+          <div style={{ background:'var(--surface)', border:'0.5px solid var(--border2)', borderRadius:16, padding:28, width:480, maxWidth:'95vw', maxHeight:'90vh', overflowY:'auto' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+              <div>
+                <div style={{ fontSize:16, fontWeight:600 }}>💰 Sell watch</div>
+                <div style={{ fontSize:13, color:'var(--muted)', marginTop:2 }}>{sellInv.watch_name}</div>
+              </div>
+              <button onClick={()=>setSellInv(null)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:20 }}>✕</button>
+            </div>
+
+            {/* Watch summary */}
+            <div style={{ background:'var(--surface2)', borderRadius:10, padding:'12px 14px', marginBottom:18 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+                <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Watch</div><div style={{ fontSize:12, fontWeight:500 }}>{sellInv.watch_name}</div></div>
+                <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Brand</div><div style={{ fontSize:12 }}>{sellInv.brand||'—'}</div></div>
+                <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Bought for</div><div style={{ fontSize:12, fontWeight:500, color:'var(--red)' }}>{sellInv.purchase_czk>0?fmtC(sellInv.purchase_czk,'CZK'):'—'}{sellInv.purchase_cur!=='CZK'&&<span style={{ fontSize:10, color:'var(--muted)', display:'block' }}>{fmtOrig(sellInv.purchase_czk,sellInv.purchase_cur)}</span>}</div></div>
+              </div>
+            </div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+              <div><label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>Sell date</label><input type="date" value={sellDate} onChange={e=>setSellDate(e.target.value)} style={INP} /></div>
+              <div><label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>Customer</label><input value={sellCustomer} onChange={e=>setSellCustomer(e.target.value)} placeholder="Customer name" style={INP} /></div>
+              <div><label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>Sell price</label>
+                <div style={{ display:'flex', gap:4 }}>
+                  <input type="number" value={sellRevenue} onChange={e=>setSellRevenue(e.target.value)} placeholder="0" style={{ ...INP, flex:1, borderRadius:'8px 0 0 8px', color:'var(--green)' }} />
+                  <select value={sellRevCur} onChange={e=>setSellRevCur(e.target.value as Cur)} style={{ ...INP, width:'auto', minWidth:58, borderRadius:'0 8px 8px 0', borderLeft:'none' }}>{CURS.map(c=><option key={c} value={c}>{c}</option>)}</select>
+                </div>
+              </div>
+              <div><label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>Shipping cost</label>
+                <div style={{ display:'flex', gap:4 }}>
+                  <input type="number" value={sellShipping} onChange={e=>setSellShipping(e.target.value)} placeholder="0" style={{ ...INP, flex:1, borderRadius:'8px 0 0 8px' }} />
+                  <select value={sellShipCur} onChange={e=>setSellShipCur(e.target.value as Cur)} style={{ ...INP, width:'auto', minWidth:58, borderRadius:'0 8px 8px 0', borderLeft:'none' }}>{CURS.map(c=><option key={c} value={c}>{c}</option>)}</select>
+                </div>
+              </div>
+              <div><label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>Ads cost</label>
+                <div style={{ display:'flex', gap:4 }}>
+                  <input type="number" value={sellAds} onChange={e=>setSellAds(e.target.value)} placeholder="0" style={{ ...INP, flex:1, borderRadius:'8px 0 0 8px' }} />
+                  <select value={sellAdsCur} onChange={e=>setSellAdsCur(e.target.value as Cur)} style={{ ...INP, width:'auto', minWidth:58, borderRadius:'0 8px 8px 0', borderLeft:'none' }}>{CURS.map(c=><option key={c} value={c}>{c}</option>)}</select>
+                </div>
+              </div>
+            </div>
+
+            {/* Live profit preview */}
+            {sellRevenue && (
+              <div style={{ background:'var(--surface2)', borderRadius:8, padding:'12px 14px', marginBottom:16 }}>
+                <div style={{ fontSize:11, color:'var(--muted)', marginBottom:8 }}>Profit preview</div>
+                {(() => {
+                  const rev = tc(parseFloat(sellRevenue)||0, sellRevCur)
+                  const ship = tc(parseFloat(sellShipping)||0, sellShipCur)
+                  const ads = tc(parseFloat(sellAds)||0, sellAdsCur)
+                  const profit = rev - sellInv.purchase_czk - ship - ads
+                  const m = rev > 0 ? Math.round(profit/rev*100) : 0
+                  return (
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <div style={{ fontSize:12, color:'var(--muted)' }}>
+                        <div>{fmtC(rev,'CZK')} revenue</div>
+                        <div>− {fmtC(sellInv.purchase_czk + ship + ads,'CZK')} costs</div>
+                      </div>
+                      <div style={{ textAlign:'right' }}>
+                        <div style={{ fontSize:20, fontWeight:600, color:pc(profit) }}>{fmtC(profit,'CZK')}</div>
+                        <div style={{ fontSize:12, color:m>=30?'var(--green)':m>=15?'var(--gold)':'var(--red)' }}>{m}% margin</div>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
+
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={confirmSell} disabled={loading||!sellRevenue} style={{ flex:1, background:'var(--green)', border:'none', color:'#fff', borderRadius:8, padding:'10px', fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:'inherit', opacity:!sellRevenue?.5:1 }}>
+                {loading ? 'Recording...' : '✓ Record sale & mark as sold'}
+              </button>
+              <button onClick={()=>setSellInv(null)} style={{ background:'none', border:'0.5px solid var(--border2)', color:'var(--muted)', borderRadius:8, padding:'10px 16px', fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
