@@ -1,8 +1,6 @@
-'use client'
 export const dynamic = 'force-dynamic'
 import { Suspense } from 'react'
 import LoginForm from './LoginForm'
-
-export default function LoginPage() {
-  return <Suspense fallback={<div style={{ minHeight: '100vh', background: 'var(--bg)' }} />}><LoginForm /></Suspense>
+export default function Page() {
+  return <Suspense fallback={<div style={{ minHeight:'100vh', background:'var(--bg)' }} />}><LoginForm /></Suspense>
 }

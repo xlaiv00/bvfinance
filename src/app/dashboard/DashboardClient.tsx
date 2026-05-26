@@ -1,48 +1,37 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { fmtAmount, fmtRaw, fmtDate, MONTHS, MONTHS_S, CAT_EMOJI, type Expense, type Contribution, type Trip, type Currency } from '@/types'
+import { fmtCur, fmtDisplay, fmtDate, MONTHS, MONTHS_S } from '@/types'
 
-interface Props { householdId: string; myName: string; partnerName: string }
+interface HHEntry { id:string; type:string; description:string; amount_czk:number; display_amount:number; display_currency:string; category:string; person:string; date:string; source:string }
+interface BizSale { id:string; date:string; revenue_czk:number; watch_cost_czk:number; shipping_czk:number; ads_czk:number }
+interface Trip { id:string; name:string; budget_czk:number; date_from?:string; date_to?:string }
 
-function filterMonth<T extends { date: string }>(arr: T[], m: number, y: number) {
-  return arr.filter(x => { const d = new Date(x.date + 'T12:00:00'); return d.getMonth() === m && d.getFullYear() === y })
-}
-function filterYear<T extends { date: string }>(arr: T[], y: number) {
-  return arr.filter(x => new Date(x.date + 'T12:00:00').getFullYear() === y)
-}
-function getYears(arrs: { date?: string }[][]) {
-  const ys: number[] = [new Date().getFullYear()]
-  arrs.flat().forEach(x => { if (x.date) { const y = new Date(x.date + 'T12:00:00').getFullYear(); if (!ys.includes(y)) ys.push(y) } })
-  return ys.sort()
-}
-function activeMonthsOf(arr: { date: string }[], year: number) {
-  const months: number[] = []
-  arr.filter(x => new Date(x.date + 'T12:00:00').getFullYear() === year)
-    .forEach(x => { const m = new Date(x.date + 'T12:00:00').getMonth(); if (!months.includes(m)) months.push(m) })
-  return months
-}
+type Cur = 'CZK'|'EUR'
 
-export default function DashboardClient({ householdId, myName, partnerName }: Props) {
-  const [expenses, setExpenses] = useState<Expense[]>([])
-  const [contributions, setContributions] = useState<Contribution[]>([])
+export default function DashboardClient({ householdId, myName, partnerName }: { householdId:string; myName:string; partnerName:string }) {
+  const [entries, setEntries] = useState<HHEntry[]>([])
+  const [sales, setSales] = useState<BizSale[]>([])
   const [trips, setTrips] = useState<Trip[]>([])
+  const [cur, setCur] = useState<Cur>(() => typeof window !== 'undefined' ? (localStorage.getItem('cur') as Cur || 'CZK') : 'CZK')
+  const [year, setYear] = useState(new Date().getFullYear())
+  const [month, setMonth] = useState(new Date().getMonth())
+  const [view, setView] = useState<'month'|'year'>('month')
   const [loading, setLoading] = useState(true)
-  const [cur, setCur] = useState<Currency>(() => typeof window !== 'undefined' ? (localStorage.getItem('together_cur') as Currency || 'EUR') : 'EUR')
-  const [selYear, setSelYear] = useState(new Date().getFullYear())
-  const [selMonth, setSelMonth] = useState(new Date().getMonth())
-  const [viewMode, setViewMode] = useState<'month'|'year'>('month')
   const supabase = createClient()
 
-  function setAndSaveCur(c: Currency) { setCur(c); localStorage.setItem('together_cur', c) }
+  function saveCur(c: Cur) { setCur(c); localStorage.setItem('cur', c) }
+  function f(czk: number) { return fmtCur(czk, cur) }
 
   const fetchAll = useCallback(async () => {
-    const [e, c, t] = await Promise.all([
-      supabase.from('expenses').select('*').eq('household_id', householdId).order('date', { ascending: false }),
-      supabase.from('contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }),
+    const [e, s, t] = await Promise.all([
+      supabase.from('hh_entries').select('*').eq('household_id', householdId).order('date', { ascending: false }),
+      supabase.from('biz_sales').select('*').eq('household_id', householdId).order('date', { ascending: false }),
       supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false }),
     ])
-    setExpenses(e.data || []); setContributions(c.data || []); setTrips(t.data || [])
+    setEntries(e.data || [])
+    setSales(s.data || [])
+    setTrips(t.data || [])
     setLoading(false)
   }, [householdId])
 
@@ -52,250 +41,246 @@ export default function DashboardClient({ householdId, myName, partnerName }: Pr
     document.addEventListener('visibilitychange', onVis)
     window.addEventListener('focus', fetchAll)
     const ch = supabase.channel('dash-' + householdId)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => supabase.from('expenses').select('*').eq('household_id', householdId).order('date', { ascending: false }).then(({ data }) => { if (data) setExpenses(data) }))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contributions' }, () => supabase.from('contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }).then(({ data }) => { if (data) setContributions(data) }))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'trips' }, () => supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false }).then(({ data }) => { if (data) setTrips(data) }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hh_entries' }, fetchAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'biz_sales' }, fetchAll)
       .subscribe()
     return () => { supabase.removeChannel(ch); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('focus', fetchAll) }
   }, [householdId, fetchAll])
 
-  const f = (eur: number) => fmtAmount(eur, cur)
-  const years = getYears([expenses, contributions])
-  const actMonths = activeMonthsOf([...expenses, ...contributions], selYear)
-  const exps = viewMode === 'year' ? filterYear(expenses, selYear) : filterMonth(expenses, selMonth, selYear)
-  const cons = viewMode === 'year' ? filterYear(contributions, selYear) : filterMonth(contributions, selMonth, selYear)
-  const allConEUR = contributions.reduce((s, x) => s + x.amount_eur, 0)
-  const allExpEUR = expenses.reduce((s, x) => s + x.amount_eur, 0)
-  const conEUR = cons.reduce((s, x) => s + x.amount_eur, 0)
-  const expEUR = exps.reduce((s, x) => s + x.amount_eur, 0)
-  const netEUR = conEUR - expEUR
-  const lbl = viewMode === 'year' ? String(selYear) : MONTHS[selMonth] + ' ' + selYear
-  const cats: Record<string, number> = {}
-  exps.forEach(e => { cats[e.category] = (cats[e.category] || 0) + e.amount_eur })
-  const topCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 5)
-  const maxCat = topCats[0]?.[1] || 1
-  const youSpent = exps.filter(e => e.paid_by === 'you').reduce((s, e) => s + e.amount_eur, 0)
-  const partnerSpent = exps.filter(e => e.paid_by === 'partner').reduce((s, e) => s + e.amount_eur, 0)
-  const sharedSpent = exps.filter(e => e.paid_by === 'joint').reduce((s, e) => s + e.amount_eur, 0)
-  const monthlyData = MONTHS_S.map((m, i) => ({ m, label: MONTHS[i], exp: filterMonth(expenses, i, selYear).reduce((s, x) => s + x.amount_eur, 0), con: filterMonth(contributions, i, selYear).reduce((s, x) => s + x.amount_eur, 0) }))
-  const maxBar = Math.max(...monthlyData.map(d => Math.max(d.exp, d.con)), 1)
+  function filterByPeriod<T extends { date: string }>(arr: T[]) {
+    if (view === 'year') return arr.filter(x => new Date(x.date + 'T12:00:00').getFullYear() === year)
+    return arr.filter(x => { const d = new Date(x.date + 'T12:00:00'); return d.getFullYear() === year && d.getMonth() === month })
+  }
 
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--muted)', fontSize: 13 }}>Loading...</div>
+  const periodEntries = filterByPeriod(entries)
+  const periodSales = filterByPeriod(sales)
+
+  // Household P&L
+  const hhIncome = periodEntries.filter(e => e.type === 'income').reduce((s,x) => s + x.amount_czk, 0)
+  const hhExpense = periodEntries.filter(e => e.type === 'expense').reduce((s,x) => s + x.amount_czk, 0)
+  const hhNet = hhIncome - hhExpense
+
+  // Business P&L
+  const bizRevenue = periodSales.reduce((s,x) => s + (x.revenue_czk||0), 0)
+  const bizCosts = periodSales.reduce((s,x) => s + (x.watch_cost_czk||0) + (x.shipping_czk||0) + (x.ads_czk||0), 0)
+  const bizProfit = bizRevenue - bizCosts
+
+  // Combined
+  const totalIn = hhIncome + bizRevenue
+  const totalOut = hhExpense + bizCosts
+  const totalNet = hhNet + bizProfit
+
+  // All time balance
+  const allTimeIn = entries.filter(e => e.type === 'income').reduce((s,x) => s + x.amount_czk, 0)
+    + sales.reduce((s,x) => s + (x.revenue_czk||0), 0)
+  const allTimeOut = entries.filter(e => e.type === 'expense').reduce((s,x) => s + x.amount_czk, 0)
+    + sales.reduce((s,x) => s + (x.watch_cost_czk||0) + (x.shipping_czk||0) + (x.ads_czk||0), 0)
+
+  // Monthly chart data
+  const chartData = MONTHS_S.map((m, i) => {
+    const me = entries.filter(x => { const d = new Date(x.date+'T12:00:00'); return d.getFullYear()===year&&d.getMonth()===i })
+    const ms = sales.filter(x => { const d = new Date(x.date+'T12:00:00'); return d.getFullYear()===year&&d.getMonth()===i })
+    const inc = me.filter(e=>e.type==='income').reduce((s,x)=>s+x.amount_czk,0) + ms.reduce((s,x)=>s+(x.revenue_czk||0),0)
+    const exp = me.filter(e=>e.type==='expense').reduce((s,x)=>s+x.amount_czk,0) + ms.reduce((s,x)=>s+(x.watch_cost_czk||0)+(x.shipping_czk||0)+(x.ads_czk||0),0)
+    return { m, inc, exp, net: inc - exp }
+  })
+  const maxBar = Math.max(...chartData.map(d => Math.max(d.inc, d.exp)), 1)
+
+  // Active months
+  const activeMonths = [...new Set(entries.map(e => new Date(e.date+'T12:00:00')).filter(d=>d.getFullYear()===year).map(d=>d.getMonth()))]
+
+  const lbl = view === 'year' ? String(year) : MONTHS[month] + ' ' + year
+  const years = [...new Set([new Date().getFullYear(), ...entries.map(e => new Date(e.date+'T12:00:00').getFullYear())])].sort()
+
+  // Recent activity
+  const recentHH = [...periodEntries].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5)
+  const recentBiz = [...periodSales].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 4)
+
+  // Category breakdown
+  const cats: Record<string,number> = {}
+  periodEntries.filter(e=>e.type==='expense').forEach(e => { cats[e.category] = (cats[e.category]||0) + e.amount_czk })
+  const topCats = Object.entries(cats).sort((a,b)=>b[1]-a[1]).slice(0,5)
+  const maxCat = topCats[0]?.[1]||1
+
+  if (loading) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:300, color:'var(--muted)', fontSize:13 }}>Loading...</div>
 
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+      {/* Header */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:18 }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 500, letterSpacing: '-.01em' }}>Overview</div>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{lbl}</div>
+          <div style={{ fontSize:18, fontWeight:500, letterSpacing:'-.01em' }}>Overview</div>
+          <div style={{ fontSize:12, color:'var(--muted)', marginTop:2 }}>{lbl}</div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={fetchAll} style={{ background: 'var(--surface2)', border: '0.5px solid var(--border)', borderRadius: 7, padding: '4px 10px', fontSize: 12, color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit' }}>↻</button>
-          <div className="cur-toggle">
-            <button className={'cur-btn ' + (viewMode === 'month' ? 'active' : '')} onClick={() => setViewMode('month')}>Month</button>
-            <button className={'cur-btn ' + (viewMode === 'year' ? 'active' : '')} onClick={() => setViewMode('year')}>Year</button>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          <button onClick={fetchAll} style={{ background:'var(--surface2)', border:'0.5px solid var(--border)', borderRadius:7, padding:'4px 10px', fontSize:12, color:'var(--muted)', cursor:'pointer', fontFamily:'inherit' }}>↻</button>
+          <div className="toggle">
+            <button className={'toggle-btn '+(view==='month'?'active':'')} onClick={()=>setView('month')}>Month</button>
+            <button className={'toggle-btn '+(view==='year'?'active':'')} onClick={()=>setView('year')}>Year</button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Currency</span>
-            <div className="cur-toggle">
-              {(['EUR','CZK'] as Currency[]).map(c => (
-                <button key={c} className={'cur-btn ' + (cur === c ? 'active' : '')} onClick={() => setAndSaveCur(c)} title={c === cur ? 'Default (saved)' : 'Switch to ' + c}>{c}</button>
-              ))}
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ fontSize:11, color:'var(--muted)' }}>Currency</span>
+            <div className="toggle">
+              <button className={'toggle-btn '+(cur==='CZK'?'active':'')} onClick={()=>saveCur('CZK')}>CZK</button>
+              <button className={'toggle-btn '+(cur==='EUR'?'active':'')} onClick={()=>saveCur('EUR')}>EUR</button>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="year-row">{years.map(y => <button key={y} className={'yr-btn ' + (y === selYear ? 'active' : '')} onClick={() => setSelYear(y)}>{y}</button>)}</div>
+      {/* Year row */}
+      <div style={{ display:'flex', gap:4, marginBottom:8 }}>
+        {years.map(y => <button key={y} onClick={()=>setYear(y)} style={{ padding:'3px 12px', border:'0.5px solid var(--border)', borderRadius:20, fontSize:12, cursor:'pointer', background:y===year?'var(--faint)':'transparent', color:y===year?'var(--text)':'var(--muted)', fontFamily:'inherit', fontWeight:y===year?500:400 }}>{y}</button>)}
+      </div>
 
-      {viewMode === 'month' ? (
+      {/* Month strip */}
+      {view === 'month' && (
         <div className="timeline">
-          {MONTHS_S.map((m, i) => (
-            <button key={i} onClick={() => setSelMonth(i)} className={'tl-btn ' + (i === selMonth ? 'active ' : '') + (actMonths.includes(i) ? 'has-data' : '')}>
+          {MONTHS_S.map((m,i) => (
+            <button key={i} onClick={()=>setMonth(i)} className={'tl-btn '+(i===month?'active ':'')+(activeMonths.includes(i)?'has-data':'')}>
               <span className="tl-m">{m}</span><span className="tl-dot">●</span>
             </button>
           ))}
         </div>
-      ) : <div style={{ marginBottom: 22 }} />}
+      )}
+      {view === 'year' && <div style={{ marginBottom:20 }} />}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 10, marginBottom: 16 }}>
-        <div className="stat s-acc"><div className="stat-lbl">Joint balance</div><div className="stat-val acc">{f(allConEUR - allExpEUR)}</div><div className="stat-sub">All time</div></div>
-        <div className="stat s-green"><div className="stat-lbl">Money in</div><div className="stat-val green">{f(conEUR)}</div><div className="stat-sub">{lbl}</div></div>
-        <div className="stat s-red"><div className="stat-lbl">Spent</div><div className="stat-val red">{f(expEUR)}</div><div className="stat-sub">{lbl}</div></div>
-        <div className={'stat ' + (netEUR >= 0 ? 's-green' : 's-red')}><div className="stat-lbl">Net</div><div className={'stat-val ' + (netEUR >= 0 ? 'green' : 'red')}>{netEUR >= 0 ? '+' : ''}{f(netEUR)}</div><div className="stat-sub">In minus Out</div></div>
+      {/* Top KPIs - 2 columns: Household | Business */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+        {/* Household column */}
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          <div style={{ fontSize:11, fontWeight:600, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', padding:'0 2px' }}>🏠 Household</div>
+          <div className="g3">
+            <div className="stat s-green"><div className="stat-lbl">Income</div><div className="stat-val" style={{ color:'var(--green)', fontSize:17 }}>{f(hhIncome)}</div></div>
+            <div className="stat s-red"><div className="stat-lbl">Expenses</div><div className="stat-val" style={{ color:'var(--red)', fontSize:17 }}>{f(hhExpense)}</div></div>
+            <div className={'stat '+(hhNet>=0?'s-acc':'s-red')}><div className="stat-lbl">Net</div><div className="stat-val" style={{ color:hhNet>=0?'var(--acc)':'var(--red)', fontSize:17 }}>{hhNet>=0?'+':''}{f(hhNet)}</div></div>
+          </div>
+        </div>
+        {/* Business column */}
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          <div style={{ fontSize:11, fontWeight:600, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', padding:'0 2px' }}>⌚ Watch Business</div>
+          <div className="g3">
+            <div className="stat s-gold"><div className="stat-lbl">Revenue</div><div className="stat-val" style={{ color:'var(--gold)', fontSize:17 }}>{f(bizRevenue)}</div></div>
+            <div className="stat s-red"><div className="stat-lbl">Costs</div><div className="stat-val" style={{ color:'var(--red)', fontSize:17 }}>{f(bizCosts)}</div></div>
+            <div className={'stat '+(bizProfit>=0?'s-green':'s-red')}><div className="stat-lbl">Profit</div><div className="stat-val" style={{ color:bizProfit>=0?'var(--green)':'var(--red)', fontSize:17 }}>{bizProfit>=0?'+':''}{f(bizProfit)}</div></div>
+          </div>
+        </div>
       </div>
 
-      {viewMode === 'year' && (
-        <>
-          <div className="card" style={{ marginBottom: 14 }}>
-            <div className="card-head">
-              <span className="card-title">Month by month — {selYear}</span>
-              <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--muted)' }}>
-                <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--green)', borderRadius: 2, marginRight: 4 }} />Money in</span>
-                <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--red)', borderRadius: 2, marginRight: 4 }} />Spent</span>
-              </div>
-            </div>
-            <div className="card-body">
-              <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 90, marginBottom: 8 }}>
-                {monthlyData.map((d, i) => (
-                  <div key={i} style={{ flex: 1, display: 'flex', gap: 2, alignItems: 'flex-end', height: '100%' }}>
-                    <div style={{ flex: 1, background: 'var(--green)', opacity: .75, borderRadius: '3px 3px 0 0', height: d.con > 0 ? Math.max(Math.round(d.con / maxBar * 100), 3) + '%' : '2px' }} />
-                    <div style={{ flex: 1, background: 'var(--red)', opacity: .75, borderRadius: '3px 3px 0 0', height: d.exp > 0 ? Math.max(Math.round(d.exp / maxBar * 100), 3) + '%' : '2px' }} />
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>{monthlyData.map((d, i) => <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 10, color: 'var(--muted)' }}>{d.m}</div>)}</div>
-            </div>
-          </div>
-          <div className="card" style={{ marginBottom: 14 }}>
-            <div className="card-head"><span className="card-title">Monthly breakdown</span><span className="card-meta">{selYear}</span></div>
-            <div className="card-body" style={{ padding: 0 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead><tr style={{ borderBottom: '0.5px solid var(--border)' }}>{['Month','Money in','Spent','Net'].map(h => <th key={h} style={{ padding: '8px 16px', textAlign: h === 'Month' ? 'left' : 'right', color: 'var(--muted)', fontWeight: 500 }}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {monthlyData.map((d, i) => { const hasData = d.exp > 0 || d.con > 0; const net = d.con - d.exp; return (
-                    <tr key={i} style={{ borderBottom: '0.5px solid var(--border)', opacity: hasData ? 1 : 0.3 }}>
-                      <td style={{ padding: '8px 16px', fontWeight: 500 }}>{d.label}</td>
-                      <td style={{ padding: '8px 16px', textAlign: 'right', color: 'var(--green)' }}>{d.con > 0 ? '+' + f(d.con) : '—'}</td>
-                      <td style={{ padding: '8px 16px', textAlign: 'right', color: 'var(--red)' }}>{d.exp > 0 ? f(d.exp) : '—'}</td>
-                      <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 500, color: net >= 0 ? 'var(--green)' : 'var(--red)' }}>{hasData ? (net >= 0 ? '+' : '') + f(net) : '—'}</td>
-                    </tr>
-                  )})}
-                </tbody>
-                <tfoot><tr style={{ borderTop: '1px solid var(--border2)', background: 'var(--surface2)' }}>
-                  <td style={{ padding: '10px 16px', fontWeight: 600 }}>Total {selYear}</td>
-                  <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>+{f(conEUR)}</td>
-                  <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--red)', fontWeight: 600 }}>{f(expEUR)}</td>
-                  <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: netEUR >= 0 ? 'var(--green)' : 'var(--red)' }}>{netEUR >= 0 ? '+' : ''}{f(netEUR)}</td>
-                </tr></tfoot>
-              </table>
+      {/* Combined net + all-time balance */}
+      <div className="g2" style={{ marginBottom:16 }}>
+        <div className={'stat '+(totalNet>=0?'s-acc':'s-red')} style={{ padding:'16px 18px' }}>
+          <div className="stat-lbl">Combined net — {lbl}</div>
+          <div style={{ fontSize:26, fontWeight:500, color:totalNet>=0?'var(--acc)':'var(--red)', letterSpacing:'-.02em', marginTop:6 }}>{totalNet>=0?'+':''}{f(totalNet)}</div>
+          <div className="stat-sub">{f(totalIn)} in · {f(totalOut)} out</div>
+        </div>
+        <div className="stat s-blue" style={{ padding:'16px 18px' }}>
+          <div className="stat-lbl">All-time balance</div>
+          <div style={{ fontSize:26, fontWeight:500, color:'var(--blue)', letterSpacing:'-.02em', marginTop:6 }}>{f(allTimeIn - allTimeOut)}</div>
+          <div className="stat-sub">Total money in minus total out</div>
+        </div>
+      </div>
+
+      {/* Year chart */}
+      {view === 'year' && (
+        <div className="card" style={{ marginBottom:16 }}>
+          <div className="card-head">
+            <span className="card-title">Monthly overview — {year}</span>
+            <div style={{ display:'flex', gap:14, fontSize:11, color:'var(--muted)' }}>
+              <span><span style={{ display:'inline-block', width:8, height:8, background:'var(--green)', borderRadius:2, marginRight:4 }} />In</span>
+              <span><span style={{ display:'inline-block', width:8, height:8, background:'var(--red)', borderRadius:2, marginRight:4 }} />Out</span>
             </div>
           </div>
-        </>
+          <div className="card-body">
+            <div style={{ display:'flex', gap:6, alignItems:'flex-end', height:90, marginBottom:8 }}>
+              {chartData.map((d,i) => (
+                <div key={i} style={{ flex:1, display:'flex', gap:2, alignItems:'flex-end', height:'100%' }}>
+                  <div title={MONTHS[i]+' income'} style={{ flex:1, background:'var(--green)', opacity:.7, borderRadius:'3px 3px 0 0', height:d.inc>0?Math.max(Math.round(d.inc/maxBar*100),3)+'%':'2px' }} />
+                  <div title={MONTHS[i]+' expenses'} style={{ flex:1, background:'var(--red)', opacity:.7, borderRadius:'3px 3px 0 0', height:d.exp>0?Math.max(Math.round(d.exp/maxBar*100),3)+'%':'2px' }} />
+                </div>
+              ))}
+            </div>
+            <div style={{ display:'flex', gap:6 }}>{chartData.map((d,i) => <div key={i} style={{ flex:1, textAlign:'center', fontSize:10, color:'var(--muted)' }}>{d.m}</div>)}</div>
+          </div>
+        </div>
       )}
 
-      <div className="grid2" style={{ marginBottom: 14 }}>
+      {/* Recent activity */}
+      <div className="g2" style={{ marginBottom:16 }}>
         <div className="card">
-          <div className="card-head"><span className="card-title">💰 Money in</span><span className="card-meta" style={{ color: 'var(--green)' }}>{f(conEUR)}</span></div>
+          <div className="card-head"><span className="card-title">🏠 Recent household</span><span className="card-meta">{periodEntries.length} entries</span></div>
           <div className="card-body">
-            {cons.length === 0 ? <div className="empty">No money in for {lbl}</div> :
-              [...cons].sort((a,b) => b.date.localeCompare(a.date)).slice(0,6).map(c => (
-                <div key={c.id} className="tx">
-                  <div className="tx-icon" style={{ background: 'rgba(79,216,150,.12)', fontSize: 15 }}>↓</div>
-                  <div className="tx-info">
-                    <div className="tx-name">{c.note || (c.person === 'you' ? myName : partnerName)}</div>
-                    <div className="tx-meta">{c.person === 'you' ? myName : partnerName} · {c.note?.startsWith('[CF]') ? 'Cashflow' : 'Contribution'}</div>
-                  </div>
-                  <div className="tx-date">{fmtDate(c.date)}</div>
-                  <div className="tx-amt pos">{fmtRaw(c.amount, c.currency)}</div>
+            {recentHH.length === 0 ? <div className="empty">No entries for {lbl}</div> : recentHH.map(e => (
+              <div key={e.id} className="tx">
+                <div className="tx-icon" style={{ background: e.type==='income'?'rgba(79,216,150,.12)':'var(--surface2)', fontSize:14 }}>
+                  {e.type==='income'?'↓':'📦'}
                 </div>
-              ))
-            }
+                <div className="tx-info">
+                  <div className="tx-name">{e.description}</div>
+                  <div className="tx-meta">{e.category} · {e.person==='you'?myName:e.person==='partner'?partnerName:'Joint'}</div>
+                </div>
+                <div className="tx-date">{fmtDate(e.date)}</div>
+                <div className={'tx-amt '+(e.type==='income'?'pos':'neg')}>{fmtDisplay(e.display_amount, e.display_currency)}</div>
+              </div>
+            ))}
           </div>
         </div>
         <div className="card">
-          <div className="card-head"><span className="card-title">Money in breakdown</span><span className="card-meta">{lbl}</span></div>
+          <div className="card-head"><span className="card-title">⌚ Recent sales</span><span className="card-meta">{periodSales.length} sales</span></div>
           <div className="card-body">
-            {cons.length === 0 ? <div className="empty">No data for {lbl}</div> : (() => {
-              const youIn = cons.filter(c => c.person === 'you').reduce((s,c) => s+c.amount_eur, 0)
-              const partnerIn = cons.filter(c => c.person === 'partner').reduce((s,c) => s+c.amount_eur, 0)
-              const cfIn = cons.filter(c => c.note?.startsWith('[CF]')).reduce((s,c) => s+c.amount_eur, 0)
-              const maxIn = Math.max(youIn, partnerIn, cfIn, 1)
-              return [
-                { label: myName, val: youIn, color: 'var(--acc)' },
-                { label: partnerName, val: partnerIn, color: 'var(--blue)' },
-                { label: 'From cashflow', val: cfIn, color: 'var(--green)' },
-              ].filter(r => r.val > 0).map(r => (
-                <div key={r.label} style={{ marginBottom: 11 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                    <span style={{ color: 'var(--muted)' }}>{r.label}</span>
-                    <span style={{ fontWeight: 500, color: r.color }}>{f(r.val)}</span>
+            {recentBiz.length === 0 ? <div className="empty">No sales for {lbl}</div> : recentBiz.map(s => {
+              const profit = (s.revenue_czk||0) - (s.watch_cost_czk||0) - (s.shipping_czk||0) - (s.ads_czk||0)
+              return (
+                <div key={s.id} className="tx">
+                  <div className="tx-icon" style={{ background:'rgba(245,166,35,.12)', fontSize:14 }}>⌚</div>
+                  <div className="tx-info">
+                    <div className="tx-name">{(s as any).watch_name || 'Watch sale'}</div>
+                    <div className="tx-meta">{(s as any).customer}</div>
                   </div>
-                  <div className="bar-track"><div className="bar-fill" style={{ width: Math.round(r.val/maxIn*100)+'%', background: r.color }} /></div>
+                  <div className="tx-date">{fmtDate(s.date)}</div>
+                  <div className="tx-amt pos">{f(profit)}</div>
                 </div>
-              ))
-            })()}
+              )
+            })}
           </div>
         </div>
       </div>
 
-      <div className="grid2" style={{ marginBottom: 14 }}>
+      {/* Category + Trips */}
+      <div className="g2">
         <div className="card">
-          <div className="card-head"><span className="card-title">Recent expenses</span><span className="card-meta">{exps.length} {viewMode === 'year' ? 'this year' : 'this month'}</span></div>
+          <div className="card-head"><span className="card-title">Household expenses by category</span><span className="card-meta">{lbl}</span></div>
           <div className="card-body">
-            {exps.length === 0 ? <div className="empty">No expenses for {lbl}</div> :
-              [...exps].sort((a,b) => b.date.localeCompare(a.date)).slice(0,6).map(e => (
-                <div key={e.id} className="tx">
-                  <div className="tx-icon">{CAT_EMOJI[e.category] || '📦'}</div>
-                  <div className="tx-info">
-                    <div className="tx-name">{e.description}</div>
-                    <div className="tx-meta">{e.category} · {e.paid_by === 'you' ? myName : e.paid_by === 'partner' ? partnerName : 'Joint'}</div>
-                  </div>
-                  <div className="tx-date">{fmtDate(e.date)}</div>
-                  <div className="tx-amt neg">{fmtRaw(e.amount, e.currency)}</div>
+            {topCats.length === 0 ? <div className="empty">No expenses for {lbl}</div> : topCats.map(([cat, czk]) => (
+              <div key={cat} style={{ marginBottom:11 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, marginBottom:4 }}>
+                  <span style={{ color:'var(--muted)' }}>{cat}</span>
+                  <span style={{ fontWeight:500 }}>{f(czk)}</span>
                 </div>
-              ))
-            }
+                <div className="bar-track"><div className="bar-fill" style={{ width:Math.round(czk/maxCat*100)+'%', background:'var(--acc)' }} /></div>
+              </div>
+            ))}
           </div>
         </div>
         <div className="card">
-          <div className="card-head"><span className="card-title">By category</span><span className="card-meta">{lbl}</span></div>
+          <div className="card-head"><span className="card-title">✈️ Trips</span><span className="card-meta">{trips.length} planned</span></div>
           <div className="card-body">
-            {topCats.length === 0 ? <div className="empty">No data for {lbl}</div> :
-              topCats.map(([cat, eur]) => (
-                <div key={cat} style={{ marginBottom: 11 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                    <span style={{ color: 'var(--muted)' }}>{CAT_EMOJI[cat] || ''} {cat}</span>
-                    <span style={{ fontWeight: 500 }}>{f(eur)}</span>
+            {trips.length === 0 ? <div className="empty">No trips yet</div> : trips.slice(0,4).map(t => {
+              const spent = entries.filter(e => e.source_id === t.id).reduce((s,x) => s+x.amount_czk, 0)
+              const pct = t.budget_czk > 0 ? Math.min(Math.round(spent/t.budget_czk*100), 100) : 0
+              return (
+                <div key={t.id} style={{ marginBottom:14 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, marginBottom:5 }}>
+                    <span style={{ fontWeight:500 }}>✈️ {t.name}</span>
+                    <span style={{ color:'var(--blue)', fontWeight:500 }}>{f(t.budget_czk)}</span>
                   </div>
-                  <div className="bar-track"><div className="bar-fill" style={{ width: Math.round(eur/maxCat*100)+'%', background: 'var(--acc)' }} /></div>
-                </div>
-              ))
-            }
-          </div>
-        </div>
-      </div>
-
-      <div className="grid2" style={{ marginBottom: 14 }}>
-        <div className="card">
-          <div className="card-head"><span className="card-title">Who paid</span><span className="card-meta">{lbl}</span></div>
-          <div className="card-body">
-            {expEUR === 0 ? <div className="empty">No expenses for {lbl}</div> : (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
-                  <div style={{ textAlign: 'center', flex: 1 }}>
-                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{myName}</div>
-                    <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--acc)' }}>{f(youSpent + sharedSpent/2)}</div>
-                  </div>
-                  <div style={{ textAlign: 'center', flex: 1 }}>
-                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{partnerName}</div>
-                    <div style={{ fontSize: 20, fontWeight: 500, color: 'var(--blue)' }}>{f(partnerSpent + sharedSpent/2)}</div>
+                  <div className="bar-track"><div className="bar-fill" style={{ width:pct+'%', background:pct>90?'var(--red)':pct>70?'var(--gold)':'var(--blue)' }} /></div>
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--muted)', marginTop:3 }}>
+                    <span>{pct}% used</span><span>{f(t.budget_czk - spent)} left</span>
                   </div>
                 </div>
-                {[{label: myName + ' paid', val: youSpent, color:'var(--acc)'},{label:'Joint',val:sharedSpent,color:'var(--green)'},{label:partnerName+' paid',val:partnerSpent,color:'var(--blue)'}].map(r => (
-                  <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderBottom: '0.5px solid var(--border)' }}>
-                    <span style={{ color: 'var(--muted)' }}>{r.label}</span>
-                    <span style={{ fontWeight: 500, color: r.color }}>{f(r.val)}</span>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        </div>
-        <div className="card">
-          <div className="card-head"><span className="card-title">Trips</span><span className="card-meta">{trips.length} planned</span></div>
-          <div className="card-body">
-            {trips.length === 0 ? <div className="empty">No trips yet</div> :
-              trips.slice(0,4).map(t => (
-                <div key={t.id} style={{ marginBottom: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-                    <span style={{ fontWeight: 500 }}>✈️ {t.name}</span>
-                    <span style={{ color: 'var(--blue)', fontWeight: 500 }}>{f(t.budget_eur)}</span>
-                  </div>
-                  {(t.date_from || t.date_to) && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.date_from ? fmtDate(t.date_from) : ''}{t.date_from && t.date_to ? ' → ' : ''}{t.date_to ? fmtDate(t.date_to) : ''}</div>}
-                </div>
-              ))
-            }
+              )
+            })}
           </div>
         </div>
       </div>

@@ -1,7 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-
 export async function middleware(req: NextRequest) {
   let res = NextResponse.next({ request: { headers: req.headers } })
   const supabase = createServerClient(
@@ -10,8 +9,8 @@ export async function middleware(req: NextRequest) {
     {
       cookies: {
         getAll() { return req.cookies.getAll() },
-        setAll(cookiesToSet: { name: string; value: string; options?: any }[]) {
-          cookiesToSet.forEach(({ name, value, options }) => {
+        setAll(cs: any[]) {
+          cs.forEach(({ name, value, options }) => {
             req.cookies.set(name, value)
             res = NextResponse.next({ request: req })
             res.cookies.set(name, value, options)
@@ -23,7 +22,6 @@ export async function middleware(req: NextRequest) {
   await supabase.auth.getUser()
   return res
 }
-
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)']
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)']
 }
