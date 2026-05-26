@@ -1,21 +1,22 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { fmtCur, fromCZK, toCZK, today } from '@/types'
+import { today } from '@/types'
 import { useCurrencyRates, toCZKr, fromCZKr, fmtR } from '@/hooks/useCurrencyRates'
 
-const RATES: Record<string,number> = { CZK:1, EUR:24.5, USD:22.8, VND:0.000895 }
 const CURS = ['CZK','EUR','USD','VND'] as const
 type Cur = typeof CURS[number]
 
 function fmtC(czk: number, c: string) { return fmtR(czk, c, rates) }
-function fmtOrig(czk: number, c: string) {
-  const v = czk / (RATES[c]||1)
-  if (c==='VND') return Math.round(v).toLocaleString('vi-VN') + ' ₫'
-  if (c==='CZK') return Math.round(v).toLocaleString('cs-CZ') + ' Kč'
-  if (c==='EUR') return '€' + v.toFixed(2)
-  if (c==='USD') return '$' + v.toFixed(2)
-  return v.toFixed(2)
+function fmtOrig(czk: number, c: string, r: any) {
+  const v = czk / (r[c+'_CZK']||c==='CZK'?czk:(czk/24.5))
+  // use fromCZKr for display
+  if (c==='CZK') return Math.round(czk).toLocaleString('cs-CZ') + ' Kč'
+  const val = fromCZKr(czk, c, r)
+  if (c==='VND') return Math.round(val).toLocaleString('vi-VN') + ' ₫'
+  if (c==='EUR') return '€' + val.toFixed(2)
+  if (c==='USD') return '$' + val.toFixed(2)
+  return val.toFixed(2)
 }
 function tc(a: number, c: string) { return toCZKr(a, c, rates) }
 function fc(czk: number, c: string) { return fromCZKr(czk, c, rates) }
@@ -299,7 +300,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
                     <td style={{ padding:'9px 12px', color:'var(--muted)', maxWidth:130, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.watch_name}</td>
                     <td style={{ padding:'9px 12px', textAlign:'right' }}>
                       <div style={{ color:'var(--green)', fontWeight:500 }}>{fmtC(s.revenue_czk,dc)}</div>
-                      {s.revenue_cur!==dc&&<div style={{ fontSize:10, color:'var(--muted)' }}>{fmtOrig(s.revenue_czk,s.revenue_cur)}</div>}
+                      {s.revenue_cur!==dc&&<div style={{ fontSize:10, color:'var(--muted)' }}>{fmtOrig(s.revenue_czk,s.revenue_cur,rates)}</div>}
                     </td>
                     <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--muted)' }}>{fmtC((s.watch_cost_czk||0)+(s.shipping_czk||0)+(s.ads_czk||0),dc)}</td>
                     <td style={{ padding:'9px 12px', textAlign:'right' }}>
@@ -481,7 +482,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
                   <td style={{ padding:'9px 12px' }}><span style={{ fontSize:11, fontWeight:500, color:STATUS[item.status]?.c, background:STATUS[item.status]?.c+'18', padding:'2px 8px', borderRadius:20 }}>{STATUS[item.status]?.l}</span></td>
                   <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--red)' }}>
                     <div>{item.purchase_czk>0?fmtC(item.purchase_czk,'CZK'):'—'}</div>
-                    {item.purchase_cur!=='CZK'&&item.purchase_czk>0&&<div style={{ fontSize:10, color:'var(--muted)' }}>{fmtOrig(item.purchase_czk,item.purchase_cur)}</div>}
+                    {item.purchase_cur!=='CZK'&&item.purchase_czk>0&&<div style={{ fontSize:10, color:'var(--muted)' }}>{fmtOrig(item.purchase_czk,item.purchase_cur,rates)}</div>}
                   </td>
                   <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--green)' }}>{item.asking_czk>0?fmtC(item.asking_czk,item.asking_cur as Cur):'—'}</td>
                   <td style={{ padding:'9px 12px', textAlign:'right' }}>

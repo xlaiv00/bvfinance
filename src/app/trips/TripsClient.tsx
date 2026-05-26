@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { fmtDate, fmtDisplay, today, TRIP_CATS, CAT_EMOJI } from '@/types'
+import { fmtDate, today, TRIP_CATS, CAT_EMOJI } from '@/types'
 import { useCurrencyRates, toCZKr, fmtR } from '@/hooks/useCurrencyRates'
 
 type Cur = 'CZK'|'EUR'
@@ -158,7 +158,7 @@ export default function TripsClient({ householdId, myName, partnerName, initTrip
                 <span style={{ color:'var(--muted)' }}>{pct}% spent</span>
                 {editBudgetId===trip.id ? (
                   <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                    <input type="number" value={newBudget} onChange={e=>setNewBudget(e.target.value)} autoFocus placeholder={String(fmtCur(trip.budget_czk,'CZK').replace(' Kč','').replace(' Kč',''))} onKeyDown={e=>{if(e.key==='Enter')updateBudget(trip.id,trip.budget_currency);if(e.key==='Escape')setEditBudgetId(null)}} style={{ ...INP, width:100, fontSize:12 }} />
+                    <input type="number" value={newBudget} onChange={e=>setNewBudget(e.target.value)} autoFocus placeholder={String(Math.round(trip.budget_czk))} onKeyDown={e=>{if(e.key==='Enter')updateBudget(trip.id,trip.budget_currency);if(e.key==='Escape')setEditBudgetId(null)}} style={{ ...INP, width:100, fontSize:12 }} />
                     <button onClick={()=>updateBudget(trip.id,trip.budget_currency)} style={{ background:'var(--acc2)', border:'none', color:'#fff', borderRadius:6, padding:'4px 10px', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>Save</button>
                     <button onClick={()=>setEditBudgetId(null)} style={{ background:'none', border:'0.5px solid var(--border)', color:'var(--muted)', borderRadius:6, padding:'4px 8px', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>✕</button>
                   </div>
@@ -227,7 +227,7 @@ export default function TripsClient({ householdId, myName, partnerName, initTrip
                           <div className="tx-meta">{exp.category}</div>
                         </div>
                         <div className="tx-date">{fmtDate(exp.date)}</div>
-                        <div className="tx-amt neg">{fmtDisplay(exp.display_amount, exp.display_currency)}</div>
+                        <div className="tx-amt neg">{fmtR(exp.amount_czk, exp.display_currency, rates)}</div>
                         <button className="del-btn" onClick={()=>deleteExpense(exp,trip.name)}>✕</button>
                       </div>
                     ))}
