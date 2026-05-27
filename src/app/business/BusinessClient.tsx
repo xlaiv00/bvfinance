@@ -9,11 +9,11 @@ type Cur = typeof CURS[number]
 
 function pc(czk: number) { return czk>0?'var(--green)':czk<0?'var(--red)':'var(--muted)' }
 
-interface Sale { id:string; date:string; customer:string; watch_name:string; revenue_czk:number; revenue_cur:string; watch_cost_czk:number; watch_cost_cur:string; shipping_czk:number; shipping_cur:string; ads_czk:number; ads_cur:string; notes:string }
-interface Inv { id:string; watch_name:string; brand:string; model:string; purchase_czk:number; purchase_cur:string; asking_czk:number; asking_cur:string; status:string; notes:string; date_purchased:string }
+interface Sale { id:string; date:string; customer:string; watch_name:string; revenue_czk:number; revenue_cur:string; watch_cost_czk:number; watch_cost_cur:string; sup_shipping_czk:number; sup_shipping_cur:string; service_czk:number; service_cur:string; shipping_czk:number; shipping_cur:string; ads_czk:number; ads_cur:string; notes:string }
+interface Inv { id:string; watch_name:string; brand:string; model:string; purchase_czk:number; purchase_cur:string; supplier_shipping_czk:number; supplier_shipping_cur:string; service_czk:number; service_cur:string; asking_czk:number; asking_cur:string; status:string; notes:string; date_purchased:string }
 
-type Form = { date:string; customer:string; watch_name:string; revenue:string; revenue_cur:Cur; watch_cost:string; watch_cost_cur:Cur; shipping:string; shipping_cur:Cur; ads:string; ads_cur:Cur; notes:string }
-const EF = (): Form => ({ date:today(), customer:'', watch_name:'', revenue:'', revenue_cur:'CZK', watch_cost:'', watch_cost_cur:'VND', shipping:'', shipping_cur:'CZK', ads:'', ads_cur:'CZK', notes:'' })
+type Form = { date:string; customer:string; watch_name:string; revenue:string; revenue_cur:Cur; watch_cost:string; watch_cost_cur:Cur; sup_shipping:string; sup_shipping_cur:Cur; service:string; service_cur:Cur; shipping:string; shipping_cur:Cur; ads:string; ads_cur:Cur; notes:string }
+const EF = (): Form => ({ date:today(), customer:'', watch_name:'', revenue:'', revenue_cur:'CZK', watch_cost:'', watch_cost_cur:'VND', sup_shipping:'', sup_shipping_cur:'CZK', service:'', service_cur:'CZK', shipping:'', shipping_cur:'CZK', ads:'', ads_cur:'CZK', notes:'' })
 
 const STATUS = { in_stock:{l:'🟢 In stock',c:'var(--green)'}, listed:{l:'🟡 Listed',c:'var(--gold)'}, reserved:{l:'🔵 Reserved',c:'var(--blue)'}, sold:{l:'🔴 Sold',c:'var(--red)'} } as any
 
@@ -62,12 +62,12 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
   }
 
   function p(patch: Partial<Form>) { setForm(prev => ({ ...prev, ...patch })) }
-  function profitCZK(s: Sale) { return (s.revenue_czk||0)-(s.watch_cost_czk||0)-(s.shipping_czk||0)-(s.ads_czk||0) }
+  function profitCZK(s: Sale) { return (s.revenue_czk||0)-(s.watch_cost_czk||0)-(s.sup_shipping_czk||0)-(s.service_czk||0)-(s.shipping_czk||0)-(s.ads_czk||0) }
 
   const months = sales.map(s=>s.date?.slice(0,7)).filter((m,i,a):m is string=>Boolean(m)&&a.indexOf(m)===i).sort().reverse()
   const filtered = filterMonth==='all'?sales:sales.filter(s=>s.date?.startsWith(filterMonth))
   const totRev = filtered.reduce((s,x)=>s+(x.revenue_czk||0),0)
-  const totCost = filtered.reduce((s,x)=>s+(x.watch_cost_czk||0)+(x.shipping_czk||0)+(x.ads_czk||0),0)
+  const totCost = filtered.reduce((s,x)=>s+(x.watch_cost_czk||0)+(x.sup_shipping_czk||0)+(x.service_czk||0)+(x.shipping_czk||0)+(x.ads_czk||0),0)
   const totProfit = totRev - totCost
   const margin = totRev>0?Math.round(totProfit/totRev*100):0
 
@@ -75,6 +75,8 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
     setForm({ date:s.date, customer:s.customer, watch_name:s.watch_name,
       revenue:fc(s.revenue_czk,s.revenue_cur).toFixed(s.revenue_cur==='VND'?0:2).replace(/\.00$/,''), revenue_cur:s.revenue_cur as Cur,
       watch_cost:fc(s.watch_cost_czk,s.watch_cost_cur).toFixed(s.watch_cost_cur==='VND'?0:2).replace(/\.00$/,''), watch_cost_cur:s.watch_cost_cur as Cur,
+      sup_shipping:fc(s.sup_shipping_czk||0,'CZK').toFixed(2).replace(/\.00$/,''), sup_shipping_cur:(s.sup_shipping_cur||'CZK') as Cur,
+      service:fc(s.service_czk||0,'CZK').toFixed(2).replace(/\.00$/,''), service_cur:(s.service_cur||'CZK') as Cur,
       shipping:fc(s.shipping_czk,s.shipping_cur).toFixed(2).replace(/\.00$/,''), shipping_cur:s.shipping_cur as Cur,
       ads:fc(s.ads_czk,s.ads_cur).toFixed(2).replace(/\.00$/,''), ads_cur:s.ads_cur as Cur,
       notes:s.notes })
@@ -87,6 +89,8 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
     const row = { household_id:householdId, date:form.date, customer:form.customer, watch_name:form.watch_name,
       revenue_czk:revCZK, revenue_cur:form.revenue_cur,
       watch_cost_czk:tc(parseFloat(form.watch_cost)||0,form.watch_cost_cur), watch_cost_cur:form.watch_cost_cur,
+      sup_shipping_czk:tc(parseFloat(form.sup_shipping)||0,form.sup_shipping_cur), sup_shipping_cur:form.sup_shipping_cur,
+      service_czk:tc(parseFloat(form.service)||0,form.service_cur), service_cur:form.service_cur,
       shipping_czk:tc(parseFloat(form.shipping)||0,form.shipping_cur), shipping_cur:form.shipping_cur,
       ads_czk:tc(parseFloat(form.ads)||0,form.ads_cur), ads_cur:form.ads_cur,
       notes:form.notes }
@@ -112,6 +116,10 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
     setIAsking(fc(i.asking_czk,i.asking_cur).toFixed(2).replace(/\.00$/,''))
     setIAskingCur(i.asking_cur as Cur)
     setIStatus(i.status); setINotes(i.notes); setIDate(i.date_purchased||today())
+    setISupShip(i.supplier_shipping_czk>0?fc(i.supplier_shipping_czk,i.supplier_shipping_cur||'CZK').toFixed(2).replace(/\.00$/,''):'')
+    setISupShipCur((i.supplier_shipping_cur||'CZK') as Cur)
+    setIService(i.service_czk>0?fc(i.service_czk,i.service_cur||'CZK').toFixed(2).replace(/\.00$/,''):'')
+    setIServiceCur((i.service_cur||'CZK') as Cur)
     setEditInvId(i.id); setShowInvForm(true)
   }
 
@@ -119,12 +127,14 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
     setLoading(true)
     const row = { household_id:householdId, watch_name:iName, brand:iBrand, model:iModel,
       purchase_czk:tc(parseFloat(iPurchase)||0,iPurchaseCur), purchase_cur:iPurchaseCur,
+      supplier_shipping_czk:tc(parseFloat(iSupShip)||0,iSupShipCur), supplier_shipping_cur:iSupShipCur,
+      service_czk:tc(parseFloat(iService)||0,iServiceCur), service_cur:iServiceCur,
       asking_czk:tc(parseFloat(iAsking)||0,iAskingCur), asking_cur:iAskingCur,
       status:iStatus, notes:iNotes, date_purchased:iDate||null }
     if (editInvId) { const{data}=await supabase.from('biz_inventory').update(row).eq('id',editInvId).select().single(); if(data) setInv(p=>p.map(i=>i.id===editInvId?data as Inv:i)) }
     else { const{data}=await supabase.from('biz_inventory').insert(row).select().single(); if(data) setInv(p=>[data as Inv,...p]) }
     setShowInvForm(false); setEditInvId(null); setLoading(false)
-    setIName(''); setIBrand(''); setIModel(''); setIPurchase(''); setIAsking(''); setINotes(''); setIDate(today())
+    setIName(''); setIBrand(''); setIModel(''); setIPurchase(''); setISupShip(''); setIService(''); setIAsking(''); setINotes(''); setIDate(today())
   }
 
   async function delInv(id: string) {
@@ -157,7 +167,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
     const revCZK = tc(parseFloat(sellRevenue)||0, sellRevCur)
     const shipCZK = tc(parseFloat(sellShipping)||0, sellShipCur)
     const adsCZK = tc(parseFloat(sellAds)||0, sellAdsCur)
-    const profit = revCZK - sellInv.purchase_czk - shipCZK - adsCZK
+    const profit = revCZK - sellInv.purchase_czk - (sellInv.supplier_shipping_czk||0) - (sellInv.service_czk||0) - shipCZK - adsCZK
 
     // 1. Create sale record
     const { data: saleData } = await supabase.from('biz_sales').insert({
@@ -166,7 +176,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
       customer: sellCustomer || 'Unknown',
       watch_name: sellInv.watch_name,
       revenue_czk: revCZK, revenue_cur: sellRevCur,
-      watch_cost_czk: sellInv.purchase_czk, watch_cost_cur: sellInv.purchase_cur,
+      watch_cost_czk: sellInv.purchase_czk + (sellInv.supplier_shipping_czk||0) + (sellInv.service_czk||0), watch_cost_cur: sellInv.purchase_cur,
       shipping_czk: shipCZK, shipping_cur: sellShipCur,
       ads_czk: adsCZK, ads_cur: sellAdsCur,
       notes: sellInv.notes || ''
@@ -183,7 +193,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
 
   const INP: React.CSSProperties = { background:'var(--surface2)', border:'0.5px solid var(--border2)', borderRadius:8, padding:'8px 10px', fontSize:13, color:'var(--text)', fontFamily:'inherit', outline:'none', width:'100%' }
   const fRev = tc(parseFloat(form.revenue)||0,form.revenue_cur)
-  const fCost = tc(parseFloat(form.watch_cost)||0,form.watch_cost_cur)+tc(parseFloat(form.shipping)||0,form.shipping_cur)+tc(parseFloat(form.ads)||0,form.ads_cur)
+  const fCost = tc(parseFloat(form.watch_cost)||0,form.watch_cost_cur)+tc(parseFloat(form.sup_shipping)||0,form.sup_shipping_cur)+tc(parseFloat(form.service)||0,form.service_cur)+tc(parseFloat(form.shipping)||0,form.shipping_cur)+tc(parseFloat(form.ads)||0,form.ads_cur)
   const fProfit = fRev - fCost
 
   // Analytics
@@ -250,7 +260,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
               <div style={{ gridColumn:'1/-1' }}><label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>Watch name</label><input value={form.watch_name} onChange={e=>p({watch_name:e.target.value})} placeholder="e.g. Tissot Seastar C350" style={INP} /></div>
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
-              {([['Sell price','revenue','revenue_cur','var(--green)'],['Watch cost (supplier)','watch_cost','watch_cost_cur',null],['Shipping','shipping','shipping_cur',null],['Ads / Meta','ads','ads_cur',null]] as [string,keyof Form,keyof Form,string|null][]).map(([l,k,ck,col])=>(
+              {([['Sell price','revenue','revenue_cur','var(--green)'],['Watch cost (supplier)','watch_cost','watch_cost_cur',null],['Supplier shipping','sup_shipping','sup_shipping_cur',null],['Service cost','service','service_cur',null],['Delivery shipping','shipping','shipping_cur',null],['Ads / Meta','ads','ads_cur',null]] as [string,keyof Form,keyof Form,string|null][]).map(([l,k,ck,col])=>(
                 <div key={String(k)}>
                   <label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>{l}</label>
                   <div style={{ display:'flex', gap:4 }}>
@@ -262,7 +272,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
             </div>
             {(fRev>0||fCost>0)&&<div style={{ background:'var(--surface2)', borderRadius:8, padding:'12px 14px', marginBottom:12 }}>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, marginBottom:10 }}>
-                {[{l:'Revenue',v:fRev,c:'var(--green)'},{l:'Watch',v:tc(parseFloat(form.watch_cost)||0,form.watch_cost_cur),c:'var(--muted)'},{l:'Shipping',v:tc(parseFloat(form.shipping)||0,form.shipping_cur),c:'var(--muted)'},{l:'Ads',v:tc(parseFloat(form.ads)||0,form.ads_cur),c:'var(--muted)'}].map(r=>(
+                {[{l:'Revenue',v:fRev,c:'var(--green)'},{l:'Watch',v:tc(parseFloat(form.watch_cost)||0,form.watch_cost_cur),c:'var(--muted)'},{l:'Sup.ship',v:tc(parseFloat(form.sup_shipping)||0,form.sup_shipping_cur),c:'var(--muted)'},{l:'Service',v:tc(parseFloat(form.service)||0,form.service_cur),c:'var(--muted)'},{l:'Delivery',v:tc(parseFloat(form.shipping)||0,form.shipping_cur),c:'var(--muted)'},{l:'Ads',v:tc(parseFloat(form.ads)||0,form.ads_cur),c:'var(--muted)'}].map(r=>(
                   <div key={r.l} style={{ textAlign:'center' }}>
                     <div style={{ fontSize:10, color:'var(--muted)', marginBottom:2 }}>{r.l}</div>
                     <div style={{ fontSize:12, fontWeight:500, color:r.c }}>{Math.round(r.v).toLocaleString('cs-CZ')} Kč</div>
@@ -289,7 +299,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
           <div className="card"><div style={{ overflowX:'auto' }}>
             <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
               <thead><tr style={{ background:'var(--surface2)', borderBottom:'0.5px solid var(--border)' }}>
-                {['Date','Customer','Watch','Revenue','Cost','Profit',''].map((h,i)=><th key={i} style={{ padding:'8px 12px', textAlign:i>=3?'right':'left', fontWeight:500, color:'var(--muted)', whiteSpace:'nowrap' }}>{h}</th>)}
+                {['Date','Customer','Watch','Revenue','Watch cost','Sup. ship','Service','Delivery','Ads','Profit',''].map((h,i)=><th key={i} style={{ padding:'8px 12px', textAlign:i>=3?'right':'left', fontWeight:500, color:'var(--muted)', whiteSpace:'nowrap' }}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {filtered.length===0?<tr><td colSpan={7} style={{ padding:24, textAlign:'center', color:'var(--muted)' }}>No sales yet</td></tr>:
@@ -303,7 +313,11 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
                       <div style={{ color:'var(--green)', fontWeight:500 }}>{fmtC(s.revenue_czk,dc)}</div>
                       {s.revenue_cur!==dc&&<div style={{ fontSize:10, color:'var(--muted)' }}>{fmtOrig(s.revenue_czk,s.revenue_cur,rates)}</div>}
                     </td>
-                    <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--muted)' }}>{fmtC((s.watch_cost_czk||0)+(s.shipping_czk||0)+(s.ads_czk||0),dc)}</td>
+                    <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--muted)' }}>{(s.watch_cost_czk||0)>0?fmtC(s.watch_cost_czk||0,dc):'—'}</td>
+                    <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--muted)' }}>{(s.sup_shipping_czk||0)>0?fmtC(s.sup_shipping_czk,dc):'—'}</td>
+                    <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--muted)' }}>{(s.service_czk||0)>0?fmtC(s.service_czk,dc):'—'}</td>
+                    <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--muted)' }}>{(s.shipping_czk||0)>0?fmtC(s.shipping_czk,dc):'—'}</td>
+                    <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--muted)' }}>{(s.ads_czk||0)>0?fmtC(s.ads_czk,dc):'—'}</td>
                     <td style={{ padding:'9px 12px', textAlign:'right' }}>
                       <div style={{ fontWeight:600, color:pc(pr) }}>{fmtC(pr,dc)}</div>
                       <div style={{ fontSize:10, color:'var(--muted)' }}>{m}%</div>
@@ -456,6 +470,12 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
               <div><label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>Purchase price</label>
                 <div style={{ display:'flex', gap:4 }}><input type="number" value={iPurchase} onChange={e=>setIPurchase(e.target.value)} style={{ ...INP, flex:1, borderRadius:'8px 0 0 8px' }} /><select value={iPurchaseCur} onChange={e=>setIPurchaseCur(e.target.value as Cur)} style={{ ...INP, width:'auto', minWidth:58, borderRadius:'0 8px 8px 0', borderLeft:'none' }}>{CURS.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
               </div>
+              <div><label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>Supplier shipping</label>
+                <div style={{ display:'flex', gap:4 }}><input type="number" value={iSupShip} onChange={e=>setISupShip(e.target.value)} placeholder="0" style={{ ...INP, flex:1, borderRadius:'8px 0 0 8px' }} /><select value={iSupShipCur} onChange={e=>setISupShipCur(e.target.value as Cur)} style={{ ...INP, width:'auto', minWidth:58, borderRadius:'0 8px 8px 0', borderLeft:'none' }}>{CURS.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
+              </div>
+              <div><label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>Service cost</label>
+                <div style={{ display:'flex', gap:4 }}><input type="number" value={iService} onChange={e=>setIService(e.target.value)} placeholder="0" style={{ ...INP, flex:1, borderRadius:'8px 0 0 8px' }} /><select value={iServiceCur} onChange={e=>setIServiceCur(e.target.value as Cur)} style={{ ...INP, width:'auto', minWidth:58, borderRadius:'0 8px 8px 0', borderLeft:'none' }}>{CURS.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
+              </div>
               <div><label style={{ fontSize:11, color:'var(--muted)', display:'block', marginBottom:4 }}>Asking price</label>
                 <div style={{ display:'flex', gap:4 }}><input type="number" value={iAsking} onChange={e=>setIAsking(e.target.value)} style={{ ...INP, flex:1, borderRadius:'8px 0 0 8px' }} /><select value={iAskingCur} onChange={e=>setIAskingCur(e.target.value as Cur)} style={{ ...INP, width:'auto', minWidth:58, borderRadius:'0 8px 8px 0', borderLeft:'none' }}>{CURS.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
               </div>
@@ -471,7 +491,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
         <div className="card"><div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
             <thead><tr style={{ background:'var(--surface2)', borderBottom:'0.5px solid var(--border)' }}>
-              {['Watch','Brand','Status','Bought for','Asking','Margin',''].map((h,i)=><th key={i} style={{ padding:'8px 12px', textAlign:i>=3?'right':'left', fontWeight:500, color:'var(--muted)' }}>{h}</th>)}
+              {['Watch','Brand','Status','Bought for','Sup. shipping','Service','Total cost','Asking','Margin',''].map((h,i)=><th key={i} style={{ padding:'8px 12px', textAlign:i>=3?'right':'left', fontWeight:500, color:'var(--muted)', whiteSpace:'nowrap' }}>{h}</th>)}
             </tr></thead>
             <tbody>
               {inv.length===0?<tr><td colSpan={7} style={{ padding:24, textAlign:'center', color:'var(--muted)' }}>No watches yet</td></tr>:
@@ -484,6 +504,17 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
                   <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--red)' }}>
                     <div>{item.purchase_czk>0?fmtC(item.purchase_czk,'CZK'):'—'}</div>
                     {item.purchase_cur!=='CZK'&&item.purchase_czk>0&&<div style={{ fontSize:10, color:'var(--muted)' }}>{fmtOrig(item.purchase_czk,item.purchase_cur,rates)}</div>}
+                  </td>
+                  <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--muted)' }}>
+                    <div>{(item.supplier_shipping_czk||0)>0?fmtC(item.supplier_shipping_czk,'CZK'):'—'}</div>
+                    {item.supplier_shipping_cur&&item.supplier_shipping_cur!=='CZK'&&(item.supplier_shipping_czk||0)>0&&<div style={{ fontSize:10, color:'var(--muted)' }}>{fmtOrig(item.supplier_shipping_czk,item.supplier_shipping_cur,rates)}</div>}
+                  </td>
+                  <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--muted)' }}>
+                    <div>{(item.service_czk||0)>0?fmtC(item.service_czk,'CZK'):'—'}</div>
+                    {item.service_cur&&item.service_cur!=='CZK'&&(item.service_czk||0)>0&&<div style={{ fontSize:10, color:'var(--muted)' }}>{fmtOrig(item.service_czk,item.service_cur,rates)}</div>}
+                  </td>
+                  <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--red)', fontWeight:500 }}>
+                    {fmtC(item.purchase_czk+(item.supplier_shipping_czk||0)+(item.service_czk||0),'CZK')}
                   </td>
                   <td style={{ padding:'9px 12px', textAlign:'right', color:'var(--green)' }}>{item.asking_czk>0?fmtC(item.asking_czk,item.asking_cur as Cur):'—'}</td>
                   <td style={{ padding:'9px 12px', textAlign:'right' }}>

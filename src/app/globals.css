@@ -1,22 +1,22 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
 :root {
-  /* New scheme: deep navy base, crisp whites, vivid accents */
-  --bg: #0d0e14;
-  --surface: #161822;
-  --surface2: #1e2030;
-  --surface3: #252840;
-  --border: rgba(255,255,255,.09);
-  --border2: rgba(255,255,255,.18);
-  --text: #f2f3fa;
-  --muted: #8b8fa8;
-  --faint: #3a3d52;
-  --acc: #818cf8;   /* indigo */
-  --acc2: #6366f1;
-  --green: #34d399;
-  --red: #f87171;
-  --gold: #fbbf24;
-  --blue: #60a5fa;
-  --purple: #a78bfa;
+  /* Dark charcoal base with amber/orange accent */
+  --bg: #0f0f0f;
+  --surface: #1a1a1a;
+  --surface2: #222222;
+  --surface3: #2a2a2a;
+  --border: rgba(255,255,255,.08);
+  --border2: rgba(255,255,255,.15);
+  --text: #ffffff;
+  --muted: #999999;
+  --faint: #444444;
+  --acc: #f97316;   /* orange */
+  --acc2: #ea6c0a;
+  --green: #22c55e;
+  --red: #ef4444;
+  --gold: #eab308;
+  --blue: #3b82f6;
+  --purple: #a855f7;
 }
 html, body { height: 100% }
 body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased }
@@ -44,7 +44,7 @@ a { text-decoration: none; color: inherit }
 .nav-label { font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: .1em; padding: 6px 18px 2px; font-weight: 700 }
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 18px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; border: none; background: none; width: 100%; text-align: left; transition: all .1s; text-decoration: none; border-left: 2px solid transparent }
 .nav-item:hover { color: var(--text); background: var(--surface2) }
-.nav-item.active { color: var(--acc); background: rgba(129,140,248,.08); border-left-color: var(--acc) }
+.nav-item.active { color: var(--acc); background: rgba(249,115,22,.08); border-left-color: var(--acc) }
 .nav-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0 }
 .nav-bottom { border-top: 1px solid var(--border2); padding: 10px 0; margin-top: auto }
 .presence-block { margin: 6px 12px 8px; padding: 10px 12px; background: var(--surface2); border-radius: 8px; border: 1px solid var(--border2) }
@@ -123,13 +123,13 @@ a { text-decoration: none; color: inherit }
 /* Tabs */
 .tabs { display: flex; border-bottom: 1px solid var(--border2); margin-bottom: 20px }
 .tab-btn { padding: 10px 20px; border: none; background: none; font-size: 13px; cursor: pointer; font-family: inherit; color: var(--muted); border-bottom: 2px solid transparent; transition: all .12s; font-weight: 500 }
-.tab-btn.active { color: var(--acc); border-bottom-color: var(--acc); font-weight: 600 }
+.tab-btn.active { color: var(--acc); border-bottom-color: var(--acc); font-weight: 700 }
 .tab-btn:hover { color: var(--text) }
 
 /* Toggle */
 .toggle { display: flex; background: var(--surface2); border-radius: 8px; padding: 3px; gap: 2px; border: 1px solid var(--border2) }
 .toggle-btn { padding: 4px 12px; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit; background: transparent; color: var(--muted); transition: all .1s; font-weight: 500 }
-.toggle-btn.active { background: var(--acc2); color: #fff; font-weight: 600 }
+.toggle-btn.active { background: var(--acc2); color: #fff; font-weight: 700 }
 
 /* Timeline */
 .timeline { display: flex; gap: 2px; background: var(--surface); border: 1px solid var(--border2); border-radius: 10px; padding: 4px; overflow-x: auto; margin-bottom: 20px }
@@ -166,7 +166,7 @@ a { text-decoration: none; color: inherit }
 .chip-red { background: rgba(248,113,113,.15); color: var(--red) }
 .chip-blue { background: rgba(96,165,250,.15); color: var(--blue) }
 .chip-gold { background: rgba(251,191,36,.15); color: var(--gold) }
-.chip-acc { background: rgba(129,140,248,.15); color: var(--acc) }
+.chip-acc { background: rgba(249,115,22,.15); color: var(--acc) }
 
 /* Table improvements */
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px }
