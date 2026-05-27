@@ -8,16 +8,7 @@ const CURS = ['CZK','EUR','USD','VND'] as const
 type Cur = typeof CURS[number]
 
 function fmtC(czk: number, c: string) { return fmtR(czk, c, rates) }
-function fmtOrig(czk: number, c: string, r: any) {
-  const v = czk / (r[c+'_CZK']||c==='CZK'?czk:(czk/24.5))
-  // use fromCZKr for display
-  if (c==='CZK') return Math.round(czk).toLocaleString('cs-CZ') + ' Kč'
-  const val = fromCZKr(czk, c, r)
-  if (c==='VND') return Math.round(val).toLocaleString('vi-VN') + ' ₫'
-  if (c==='EUR') return '€' + val.toFixed(2)
-  if (c==='USD') return '$' + val.toFixed(2)
-  return val.toFixed(2)
-}
+
 function tc(a: number, c: string) { return toCZKr(a, c, rates) }
 function fc(czk: number, c: string) { return fromCZKr(czk, c, rates) }
 function pc(czk: number) { return czk>0?'var(--green)':czk<0?'var(--red)':'var(--muted)' }
@@ -49,6 +40,16 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
   const [iStatus, setIStatus] = useState('in_stock'); const [iNotes, setINotes] = useState(''); const [iDate, setIDate] = useState(today())
   const supabase = createClient()
   const rates = useCurrencyRates()
+
+  function fmtOrig(czk: number, cur: string, r?: any) {
+    const rr = r || rates
+    if (cur === 'CZK') return Math.round(czk).toLocaleString('cs-CZ') + ' Kč'
+    const val = fromCZKr(czk, cur, rr)
+    if (cur === 'VND') return Math.round(val).toLocaleString('vi-VN') + ' ₫'
+    if (cur === 'EUR') return '€' + val.toFixed(2)
+    if (cur === 'USD') return '$' + val.toFixed(2)
+    return val.toFixed(2)
+  }
 
   useEffect(() => { load() }, [])
   async function load() {
@@ -522,7 +523,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
                 <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Watch</div><div style={{ fontSize:12, fontWeight:500 }}>{sellInv.watch_name}</div></div>
                 <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Brand</div><div style={{ fontSize:12 }}>{sellInv.brand||'—'}</div></div>
-                <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Bought for</div><div style={{ fontSize:12, fontWeight:500, color:'var(--red)' }}>{sellInv.purchase_czk>0?fmtC(sellInv.purchase_czk,'CZK'):'—'}{sellInv.purchase_cur!=='CZK'&&<span style={{ fontSize:10, color:'var(--muted)', display:'block' }}>{fmtOrig(sellInv.purchase_czk,sellInv.purchase_cur)}</span>}</div></div>
+                <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Bought for</div><div style={{ fontSize:12, fontWeight:500, color:'var(--red)' }}>{sellInv.purchase_czk>0?fmtC(sellInv.purchase_czk,'CZK'):'—'}{sellInv.purchase_cur!=='CZK'&&<span style={{ fontSize:10, color:'var(--muted)', display:'block' }}>{fmtOrig(sellInv.purchase_czk,sellInv.purchase_cur,rates)}</span>}</div></div>
               </div>
             </div>
 
