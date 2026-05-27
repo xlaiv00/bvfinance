@@ -7,10 +7,6 @@ import { useCurrencyRates, toCZKr, fromCZKr, fmtR } from '@/hooks/useCurrencyRat
 const CURS = ['CZK','EUR','USD','VND'] as const
 type Cur = typeof CURS[number]
 
-function fmtC(czk: number, c: string) { return fmtR(czk, c, rates) }
-
-function tc(a: number, c: string) { return toCZKr(a, c, rates) }
-function fc(czk: number, c: string) { return fromCZKr(czk, c, rates) }
 function pc(czk: number) { return czk>0?'var(--green)':czk<0?'var(--red)':'var(--muted)' }
 
 interface Sale { id:string; date:string; customer:string; watch_name:string; revenue_czk:number; revenue_cur:string; watch_cost_czk:number; watch_cost_cur:string; shipping_czk:number; shipping_cur:string; ads_czk:number; ads_cur:string; notes:string }
@@ -40,6 +36,10 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
   const [iStatus, setIStatus] = useState('in_stock'); const [iNotes, setINotes] = useState(''); const [iDate, setIDate] = useState(today())
   const supabase = createClient()
   const rates = useCurrencyRates()
+
+  function fmtC(czk: number, c: string) { return fmtR(czk, c, rates) }
+  function tc(a: number, c: string) { return toCZKr(a, c, rates) }
+  function fc(czk: number, c: string) { return fromCZKr(czk, c, rates) }
 
   function fmtOrig(czk: number, cur: string, r?: any) {
     const rr = r || rates
