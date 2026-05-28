@@ -310,29 +310,60 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
       ═══════════════════════════════ */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 300px', gap:14, alignItems:'start' }}>
 
-        {/* Joint recent activity */}
-        <div className="card">
-          <div className="card-head" style={{ borderLeft:'3px solid #60a5fa' }}>
-            <span className="card-title">🏠 Joint — recent activity</span>
-            <span className="card-meta">{pEntries.length} entries · {lbl}</span>
+        {/* Activity columns */}
+        <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+          {/* Joint */}
+          <div className="card">
+            <div className="card-head" style={{ borderLeft:'3px solid #60a5fa' }}>
+              <span className="card-title">🏠 Joint</span>
+              <span className="card-meta">{pEntries.length} entries · {lbl}</span>
+            </div>
+            <div className="card-body" style={{ padding:0 }}>
+              {pEntries.length===0
+                ? <div className="empty">No entries for {lbl}</div>
+                : [...pEntries].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6).map(e=>(
+                  <div key={e.id} className="tx" style={{ padding:'10px 16px' }}>
+                    <div className="tx-icon" style={{ background:e.type==='income'?'rgba(96,165,250,.12)':'var(--surface2)', border:e.type==='income'?'1px solid rgba(96,165,250,.25)':'1px solid var(--border2)', fontSize:14 }}>
+                      {e.type==='income'?'↓':(CAT_EMOJI[e.category]||'📦')}
+                    </div>
+                    <div className="tx-info">
+                      <div className="tx-name">{e.description}</div>
+                      <div className="tx-meta">{e.category} · {e.person==='you'?myName:e.person==='partner'?partnerName:'Joint'}</div>
+                    </div>
+                    <div className="tx-date">{fmtDate(e.date)}</div>
+                    <div className={'tx-amt '+(e.type==='income'?'pos':'neg')}>{fmtR(e.amount_czk,cur,rates)}</div>
+                  </div>
+                ))
+              }
+            </div>
           </div>
-          <div className="card-body" style={{ padding:0 }}>
-            {pEntries.length===0
-              ? <div className="empty">No entries for {lbl}</div>
-              : [...pEntries].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8).map(e=>(
-                <div key={e.id} className="tx" style={{ padding:'10px 16px' }}>
-                  <div className="tx-icon" style={{ background:e.type==='income'?'rgba(96,165,250,.12)':'var(--surface2)', border:e.type==='income'?'1px solid rgba(96,165,250,.25)':'1px solid var(--border2)', fontSize:14 }}>
-                    {e.type==='income'?'↓':(CAT_EMOJI[e.category]||'📦')}
-                  </div>
-                  <div className="tx-info">
-                    <div className="tx-name">{e.description}</div>
-                    <div className="tx-meta">{e.category} · {e.person==='you'?myName:e.person==='partner'?partnerName:'Joint'}</div>
-                  </div>
-                  <div className="tx-date">{fmtDate(e.date)}</div>
-                  <div className={'tx-amt '+(e.type==='income'?'pos':'neg')}>{fmtR(e.amount_czk,cur,rates)}</div>
-                </div>
-              ))
-            }
+          {/* Watch Business */}
+          <div className="card">
+            <div className="card-head" style={{ borderLeft:'3px solid var(--gold)' }}>
+              <span className="card-title">⌚ Watch Business</span>
+              <span className="card-meta">{pSales.length} sales · {lbl}</span>
+            </div>
+            <div className="card-body" style={{ padding:0 }}>
+              {pSales.length===0
+                ? <div className="empty">No sales for {lbl}</div>
+                : [...pSales].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5).map(s=>{
+                    const pr = saleProfit(s)
+                    return (
+                      <div key={s.id} className="tx" style={{ padding:'10px 16px' }}>
+                        <div className="tx-icon" style={{ background:'rgba(251,191,36,.12)', border:'1px solid rgba(251,191,36,.25)', fontSize:14 }}>⌚</div>
+                        <div className="tx-info">
+                          <div className="tx-name">{s.watch_name||'Watch sale'}</div>
+                          <div className="tx-meta">{s.customer||'—'} · {fmtDate(s.date)}</div>
+                        </div>
+                        <div style={{ textAlign:'right', flexShrink:0 }}>
+                          <div style={{ fontSize:13, fontWeight:700, color:'var(--gold)' }}>{f(s.revenue_czk||0)}</div>
+                          <div style={{ fontSize:10, fontWeight:700, color:pr>=0?'var(--green)':'var(--red)' }}>{pr>=0?'+':''}{f(pr)} profit</div>
+                        </div>
+                      </div>
+                    )
+                  })
+              }
+            </div>
           </div>
         </div>
 
