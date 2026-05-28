@@ -15,19 +15,18 @@ interface Inv { id:string; watch_name:string; brand:string; model:string; purcha
 type Form = { date:string; customer:string; watch_name:string; revenue:string; revenue_cur:Cur; watch_cost:string; watch_cost_cur:Cur; sup_shipping:string; sup_shipping_cur:Cur; service:string; service_cur:Cur; shipping:string; shipping_cur:Cur; ads:string; ads_cur:Cur; notes:string }
 const EF = (): Form => ({ date:today(), customer:'', watch_name:'', revenue:'', revenue_cur:'CZK', watch_cost:'', watch_cost_cur:'VND', sup_shipping:'', sup_shipping_cur:'CZK', service:'', service_cur:'CZK', shipping:'', shipping_cur:'CZK', ads:'', ads_cur:'CZK', notes:'' })
 
-interface BizContrib { id:string; person:string; amount_czk:number; display_amount:number; display_currency:string; date:string; note:string }
 
 const STATUS = { in_stock:{l:'🟢 In stock',c:'var(--green)'}, listed:{l:'🟡 Listed',c:'var(--gold)'}, reserved:{l:'🔵 Reserved',c:'var(--blue)'}, sold:{l:'🔴 Sold',c:'var(--red)'} } as any
 
 export default function BusinessClient({ householdId }: { householdId:string }) {
   const [sales, setSales] = useState<Sale[]>([])
   const [inv, setInv] = useState<Inv[]>([])
-  const [tab, setTab] = useState<'sales'|'analytics'|'inventory'|'contributions'>('sales')
+  const [tab, setTab] = useState<'sales'|'analytics'|'inventory'|'capital'>('sales')
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<string|null>(null)
   const [form, setForm] = useState<Form>(EF())
   const [loading, setLoading] = useState(false)
-  const [contribs, setContribs] = useState<BizContrib[]>([])
+  const [hhEntries, setHHEntries] = useState<any[]>([])
   const [cAmt, setCAmt] = useState('')
   const [cCur, setCCur] = useState<Cur>('CZK')
   const [cWho, setCWho] = useState('you')
@@ -46,6 +45,19 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
   const [iSupShipCur, setISupShipCur] = useState<Cur>('CZK')
   const [iService, setIService] = useState('')
   const [iServiceCur, setIServiceCur] = useState<Cur>('CZK')
+  // Capital tab state
+  const [withAmt, setWithAmt] = useState('')
+  const [withCur, setWithCurr] = useState('CZK')
+  const [withNote, setWithNote] = useState('')
+  const [withDate, setWithDate] = useState(new Date().toISOString().split('T')[0])
+  const [showWithdraw, setShowWithdraw] = useState(false)
+  const [expAmt, setExpAmt] = useState('')
+  const [expCur, setExpCurr] = useState('CZK')
+  const [expDesc, setExpDesc] = useState('')
+  const [expDate, setExpDate] = useState(new Date().toISOString().split('T')[0])
+  const [showExpForm, setShowExpForm] = useState(false)
+  const [capSaving, setCapSaving] = useState(false)
+
   const supabase = createClient()
   const rates = useCurrencyRates()
 
@@ -65,14 +77,14 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
 
   useEffect(() => { load() }, [])
   async function load() {
-    const [s, i, bc] = await Promise.all([
+    const [s, i, he] = await Promise.all([
       supabase.from('biz_sales').select('*').eq('household_id', householdId).order('date', { ascending: false }),
       supabase.from('biz_inventory').select('*').eq('household_id', householdId).order('created_at', { ascending: false }),
-      supabase.from('biz_contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }),
+      supabase.from('hh_entries').select('*').eq('household_id', householdId).in('category', ['Watch Contribution','Business Withdrawal','Business Expense']).order('date', { ascending: false }),
     ])
     if (s.data) setSales(s.data as Sale[])
     if (i.data) setInv(i.data as Inv[])
-    if (bc.data) setContribs(bc.data as BizContrib[])
+    if (he.data) setHHEntries(he.data)
   }
 
   function p(patch: Partial<Form>) { setForm(prev => ({ ...prev, ...patch })) }
@@ -230,7 +242,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
   return (
     <div style={{ paddingBottom:40 }}>
       <div className="tabs">
-        {[['sales','💰 Sales'],['analytics','📈 Analytics'],['inventory','📦 Inventory'],['contributions','⚖️ Contributions']].map(([k,l])=>(
+        {[['sales','💰 Sales'],['analytics','📈 Analytics'],['inventory','📦 Inventory'],['capital','💼 Capital']].map(([k,l])=>(
           <button key={k} className={'tab-btn '+(tab===k?'active':'')} onClick={()=>setTab(k as any)}>{l}</button>
         ))}
       </div>
@@ -552,7 +564,213 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
         </div></div>
       </>}
 
-      {/* ─── QUICK SELL MODAL ─── */}
+      {/* ─── CAPITAL TAB ─── */}
+      {tab==='capital'&&(
+        <div>
+          {/* Summary stats */}
+          {(() => {
+            const watchContribs = hhEntries.filter(e=>e.category==='Watch Contribution')
+            const myC = watchContribs.filter(e=>e.person==='you').reduce((s:number,x:any)=>s+x.amount_czk,0)
+            const partnerC = watchContribs.filter(e=>e.person==='partner').reduce((s:number,x:any)=>s+x.amount_czk,0)
+            const totalContrib = myC + partnerC
+            const withdrawals = hhEntries.filter(e=>e.category==='Business Withdrawal')
+            const totalWithdrawn = withdrawals.reduce((s:number,x:any)=>s+x.amount_czk,0)
+            const runningCosts = hhEntries.filter(e=>e.category==='Business Expense')
+            const totalRunning = runningCosts.reduce((s:number,x:any)=>s+x.amount_czk,0)
+            const capitalInInv = inv.filter(i=>i.status!=='sold').reduce((s,i)=>s+(i.purchase_czk||0)+(i.supplier_shipping_czk||0)+(i.service_czk||0),0)
+            const freeCapital = totalContrib - capitalInInv
+            const allProfit = sales.reduce((s,x)=>s+profitCZK(x),0)
+            const availableToWithdraw = allProfit - totalWithdrawn - totalRunning
+            return (
+              <>
+                {/* Capital fund */}
+                <div style={{ marginBottom:20 }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.08em', marginBottom:10 }}>Capital fund</div>
+                  <div style={{ background:'var(--surface)', border:'1px solid var(--border2)', borderRadius:14, overflow:'hidden' }}>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', borderBottom:'1px solid var(--border2)' }}>
+                      {[
+                        { l:'Total contributed', v:totalContrib, c:'var(--blue)', sub:fmtC(myC,'CZK')+' you · '+fmtC(partnerC,'CZK')+' partner' },
+                        { l:'Tied up in inventory', v:capitalInInv, c:'var(--gold)', sub:inv.filter(i=>i.status!=='sold').length+' unsold watches' },
+                        { l:'Free to deploy', v:freeCapital, c:freeCapital>=0?'var(--green)':'var(--red)', sub:freeCapital<0?'overspent':'available' },
+                      ].map((s,i)=>(
+                        <div key={s.l} style={{ padding:'16px 18px', borderRight:i<2?'1px solid var(--border2)':'' }}>
+                          <div style={{ fontSize:10, color:'var(--muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.05em', marginBottom:6 }}>{s.l}</div>
+                          <div style={{ fontSize:22, fontWeight:800, color:s.c, marginBottom:3 }}>{fmtC(s.v,'CZK')}</div>
+                          <div style={{ fontSize:11, color:'var(--muted)', fontWeight:500 }}>{s.sub}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {totalContrib > 0 && (
+                      <div style={{ padding:'12px 18px' }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:5 }}>
+                          <span>Capital deployed</span>
+                          <span>{totalContrib>0?Math.min(Math.round(capitalInInv/totalContrib*100),100):0}%</span>
+                        </div>
+                        <div className="bar-track" style={{ height:8 }}>
+                          <div className="bar-fill" style={{ width:(totalContrib>0?Math.min(Math.round(capitalInInv/totalContrib*100),100):0)+'%', background:'var(--gold)' }}/>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Profit & withdrawals */}
+                <div style={{ marginBottom:20 }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.08em', marginBottom:10 }}>Profit & withdrawals</div>
+                  <div style={{ background:'var(--surface)', border:'1px solid var(--border2)', borderRadius:14, overflow:'hidden' }}>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', borderBottom:'1px solid var(--border2)' }}>
+                      {[
+                        { l:'Total profit (all sales)', v:allProfit, c:allProfit>=0?'var(--green)':'var(--red)', sub:'revenue minus all costs' },
+                        { l:'Withdrawn to joint', v:totalWithdrawn, c:'var(--muted)', sub:withdrawals.length+' withdrawal'+( withdrawals.length!==1?'s':'') },
+                        { l:'Available to withdraw', v:availableToWithdraw, c:availableToWithdraw>0?'var(--green)':'var(--muted)', sub:'profit not yet taken out' },
+                      ].map((s,i)=>(
+                        <div key={s.l} style={{ padding:'16px 18px', borderRight:i<2?'1px solid var(--border2)':'' }}>
+                          <div style={{ fontSize:10, color:'var(--muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.05em', marginBottom:6 }}>{s.l}</div>
+                          <div style={{ fontSize:22, fontWeight:800, color:s.c, marginBottom:3 }}>{fmtC(s.v,'CZK')}</div>
+                          <div style={{ fontSize:11, color:'var(--muted)', fontWeight:500 }}>{s.sub}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Withdraw button */}
+                    <div style={{ padding:'14px 18px' }}>
+                      {!showWithdraw ? (
+                        <button onClick={()=>setShowWithdraw(true)} disabled={availableToWithdraw<=0} style={{ background:availableToWithdraw>0?'var(--green)':'var(--faint)', border:'none', color:'#fff', borderRadius:8, padding:'9px 20px', fontSize:13, fontWeight:700, cursor:availableToWithdraw>0?'pointer':'not-allowed', fontFamily:'inherit' }}>
+                          💸 Withdraw profit to Joint account
+                        </button>
+                      ) : (
+                        <div style={{ display:'flex', gap:8, alignItems:'flex-end', flexWrap:'wrap' }}>
+                          <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                            <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Amount (max {fmtC(availableToWithdraw,'CZK')})</label>
+                            <input type="number" value={withAmt} onChange={e=>setWithAmt(e.target.value)} placeholder={String(Math.round(availableToWithdraw))} style={INP} autoFocus />
+                          </div>
+                          <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                            <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Currency</label>
+                            <select value={withCur} onChange={e=>setWithCurr(e.target.value)} style={INP}><option value="CZK">CZK</option><option value="EUR">EUR</option></select>
+                          </div>
+                          <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                            <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Note</label>
+                            <input value={withNote} onChange={e=>setWithNote(e.target.value)} placeholder="e.g. Monthly payout" style={{ ...INP, width:150 }} />
+                          </div>
+                          <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                            <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Date</label>
+                            <input type="date" value={withDate} onChange={e=>setWithDate(e.target.value)} style={INP} />
+                          </div>
+                          <button onClick={async()=>{
+                            if(!withAmt) return
+                            setCapSaving(true)
+                            const amt = parseFloat(withAmt)
+                            const czk = tc(amt, withCur)
+                            // Record as withdrawal in biz context
+                            const { data: wd } = await supabase.from('hh_entries').insert({ household_id:householdId, type:'income', description:'💸 '+(withNote||'Business profit withdrawal'), amount_czk:czk, display_amount:amt, display_currency:withCur, category:'Business Withdrawal', person:'joint', date:withDate, source:'business' }).select().single()
+                            if(wd) setHHEntries(p=>[wd,...p])
+                            setWithAmt(''); setWithNote(''); setShowWithdraw(false); setCapSaving(false)
+                          }} disabled={capSaving||!withAmt} style={{ background:'var(--green)', border:'none', color:'#fff', borderRadius:8, padding:'9px 20px', fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>
+                            {capSaving?'…':'Withdraw'}
+                          </button>
+                          <button onClick={()=>setShowWithdraw(false)} style={{ background:'none', border:'1px solid var(--border2)', color:'var(--muted)', borderRadius:8, padding:'9px 14px', fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>Cancel</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Running business costs */}
+                <div style={{ marginBottom:20 }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.08em' }}>Running costs (not per sale)</div>
+                    <button onClick={()=>setShowExpForm(f=>!f)} style={{ background:showExpForm?'transparent':'var(--acc2)', border:'1px solid var(--border2)', color:showExpForm?'var(--muted)':'#fff', borderRadius:7, padding:'4px 12px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
+                      {showExpForm?'Cancel':'+ Add cost'}
+                    </button>
+                  </div>
+                  {showExpForm&&(
+                    <div style={{ background:'var(--surface2)', border:'1px solid var(--border2)', borderRadius:10, padding:'12px 16px', marginBottom:10, display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-end' }}>
+                      <div style={{ display:'flex', flexDirection:'column', gap:3, flex:1, minWidth:140 }}>
+                        <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Description</label>
+                        <input value={expDesc} onChange={e=>setExpDesc(e.target.value)} placeholder="e.g. Monthly Meta ads" style={{ ...INP, width:'100%' }} />
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                        <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Amount</label>
+                        <input type="number" value={expAmt} onChange={e=>setExpAmt(e.target.value)} placeholder="0" style={{ ...INP, width:90 }} />
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                        <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Currency</label>
+                        <select value={expCur} onChange={e=>setExpCurr(e.target.value)} style={INP}><option value="CZK">CZK</option><option value="EUR">EUR</option></select>
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                        <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Date</label>
+                        <input type="date" value={expDate} onChange={e=>setExpDate(e.target.value)} style={INP} />
+                      </div>
+                      <button onClick={async()=>{
+                        if(!expAmt||!expDesc) return
+                        setCapSaving(true)
+                        const amt = parseFloat(expAmt)
+                        const czk = tc(amt, expCur)
+                        const { data } = await supabase.from('hh_entries').insert({ household_id:householdId, type:'expense', description:expDesc, amount_czk:czk, display_amount:amt, display_currency:expCur, category:'Business Expense', person:'joint', date:expDate, source:'business' }).select().single()
+                        if(data) setHHEntries(p=>[data,...p])
+                        setExpAmt(''); setExpDesc(''); setShowExpForm(false); setCapSaving(false)
+                      }} disabled={capSaving||!expAmt||!expDesc} style={{ background:'var(--red)', border:'none', color:'#fff', borderRadius:8, padding:'9px 16px', fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>
+                        {capSaving?'…':'Add'}
+                      </button>
+                    </div>
+                  )}
+                  <div className="card">
+                    {runningCosts.length===0
+                      ? <div className="empty">No running costs yet — add recurring expenses like ads, platform fees, etc.</div>
+                      : <div style={{ overflowX:'auto' }}>
+                          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                            <thead><tr style={{ background:'var(--surface2)', borderBottom:'1px solid var(--border2)' }}>
+                              {['Date','Description','Amount',''].map((h,i)=><th key={i} style={{ padding:'8px 14px', textAlign:i===2?'right':'left', fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.05em' }}>{h}</th>)}
+                            </tr></thead>
+                            <tbody>
+                              {runningCosts.map((e:any,i:number)=>(
+                                <tr key={e.id} style={{ borderBottom:i<runningCosts.length-1?'1px solid var(--border)':'none' }}>
+                                  <td style={{ padding:'10px 14px', color:'var(--muted)', fontWeight:500 }}>{e.date}</td>
+                                  <td style={{ padding:'10px 14px', fontWeight:600 }}>{e.description}</td>
+                                  <td style={{ padding:'10px 14px', textAlign:'right', fontWeight:700, color:'var(--red)' }}>{fmtC(e.amount_czk,'CZK')}</td>
+                                  <td style={{ padding:'10px 8px', textAlign:'right' }}>
+                                    <button onClick={async()=>{ await supabase.from('hh_entries').delete().eq('id',e.id); setHHEntries(p=>p.filter((x:any)=>x.id!==e.id)) }} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--faint)', fontSize:13 }}>✕</button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot><tr style={{ borderTop:'2px solid var(--border2)', background:'var(--surface2)' }}>
+                              <td colSpan={2} style={{ padding:'10px 14px', fontWeight:700 }}>Total running costs</td>
+                              <td style={{ padding:'10px 14px', textAlign:'right', fontWeight:800, color:'var(--red)' }}>{fmtC(totalRunning,'CZK')}</td>
+                              <td/>
+                            </tr></tfoot>
+                          </table>
+                        </div>
+                    }
+                  </div>
+                </div>
+
+                {/* Withdrawal history */}
+                {withdrawals.length > 0 && (
+                  <div>
+                    <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.08em', marginBottom:10 }}>Withdrawal history</div>
+                    <div className="card">
+                      <div className="card-body" style={{ padding:0 }}>
+                        {withdrawals.map((w:any,i:number)=>(
+                          <div key={w.id} className="tx" style={{ padding:'10px 16px' }}>
+                            <div className="tx-icon" style={{ background:'rgba(34,197,94,.12)', border:'1px solid rgba(34,197,94,.2)', fontSize:14 }}>💸</div>
+                            <div className="tx-info">
+                              <div className="tx-name">{w.description}</div>
+                              <div className="tx-meta">Withdrawn to Joint · {w.date}</div>
+                            </div>
+                            <div className="tx-amt pos">{fmtC(w.amount_czk,'CZK')}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )
+          })()}
+        </div>
+      )}
+
+            {/* ─── QUICK SELL MODAL ─── */}
       {sellInv && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
           <div style={{ background:'var(--surface)', border:'0.5px solid var(--border2)', borderRadius:16, padding:28, width:480, maxWidth:'95vw', maxHeight:'90vh', overflowY:'auto' }}>

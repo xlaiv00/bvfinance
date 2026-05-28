@@ -7,12 +7,14 @@ import { useCurrencyRates, fmtR } from '@/hooks/useCurrencyRates'
 interface HHEntry { id:string; type:string; description:string; amount_czk:number; display_amount:number; display_currency:string; category:string; person:string; date:string; source:string; source_id?:string }
 interface BizSale { id:string; date:string; watch_name:string; customer:string; revenue_czk:number; watch_cost_czk:number; sup_shipping_czk:number; service_czk:number; shipping_czk:number; ads_czk:number }
 interface Trip { id:string; name:string; budget_czk:number; date_from?:string; date_to?:string }
+interface InvItem { id:string; status:string; purchase_czk:number; supplier_shipping_czk:number; service_czk:number }
 type Cur = 'CZK'|'EUR'
 
 export default function DashboardClient({ householdId, myName, partnerName }: { householdId:string; myName:string; partnerName:string }) {
   const [entries, setEntries] = useState<HHEntry[]>([])
   const [sales, setSales] = useState<BizSale[]>([])
   const [trips, setTrips] = useState<Trip[]>([])
+  const [inventory, setInventory] = useState<InvItem[]>([])
   const [loading, setLoading] = useState(true)
   const [cur, setCur] = useState<Cur>(() => typeof window !== 'undefined' ? (localStorage.getItem('cur') as Cur||'CZK') : 'CZK')
   const [year, setYear] = useState(new Date().getFullYear())
@@ -31,14 +33,16 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
   function saveCur(c: Cur) { setCur(c); localStorage.setItem('cur', c) }
 
   const fetchAll = useCallback(async () => {
-    const [e, s, t] = await Promise.all([
+    const [e, s, t, inv] = await Promise.all([
       supabase.from('hh_entries').select('*').eq('household_id', householdId).order('date', { ascending: false }),
       supabase.from('biz_sales').select('*').eq('household_id', householdId).order('date', { ascending: false }),
       supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false }),
+      supabase.from('biz_inventory').select('id,status,purchase_czk,supplier_shipping_czk,service_czk').eq('household_id', householdId),
     ])
     setEntries(e.data || [])
     setSales(s.data || [])
     setTrips(t.data || [])
+    setInventory(inv.data || [])
     setLoading(false)
   }, [householdId])
 
@@ -64,7 +68,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
 
   // Joint P&L
   const jIn  = pEntries.filter(e=>e.type==='income'&&e.category!=='Watch Contribution').reduce((s,x)=>s+x.amount_czk,0)
-  const jOut = pEntries.filter(e=>e.type==='expense').reduce((s,x)=>s+x.amount_czk,0)
+  const jOut = pEntries.filter(e=>e.type==='expense'&&e.category!=='Business Expense').reduce((s,x)=>s+x.amount_czk,0)
   const jNet = jIn - jOut
   const allJIn  = entries.filter(e=>e.type==='income'&&e.category!=='Watch Contribution').reduce((s,x)=>s+x.amount_czk,0)
   const allJOut = entries.filter(e=>e.type==='expense').reduce((s,x)=>s+x.amount_czk,0)
@@ -73,8 +77,10 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
   function saleProfit(s: BizSale) { return (s.revenue_czk||0)-(s.watch_cost_czk||0)-(s.sup_shipping_czk||0)-(s.service_czk||0)-(s.shipping_czk||0)-(s.ads_czk||0) }
   const bRev    = pSales.reduce((s,x)=>s+(x.revenue_czk||0),0)
   const bCosts  = pSales.reduce((s,x)=>s+(x.watch_cost_czk||0)+(x.sup_shipping_czk||0)+(x.service_czk||0)+(x.shipping_czk||0)+(x.ads_czk||0),0)
-  const bProfit = bRev - bCosts
-  const allBizProfit = sales.reduce((s,x)=>s+saleProfit(x),0)
+  const pRunningCosts = pEntries.filter(e=>e.category==='Business Expense'&&e.source==='business').reduce((s,x)=>s+x.amount_czk,0)
+  const bProfit = bRev - bCosts - pRunningCosts
+  const bizRunningCosts = entries.filter(e=>e.category==='Business Expense'&&e.source==='business').reduce((s,x)=>s+x.amount_czk,0)
+  const allBizProfit = sales.reduce((s,x)=>s+saleProfit(x),0) - bizRunningCosts
   // ── Contributions ──
   const allManual = entries.filter(e=>e.type==='income'&&e.source==='manual')
   const jContribs = allManual.filter(e=>e.category==='Joint Contribution')
@@ -84,6 +90,16 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
   const wMyC      = wContribs.filter(e=>e.person==='you').reduce((s,x)=>s+x.amount_czk,0)
   const wPartnerC = wContribs.filter(e=>e.person==='partner').reduce((s,x)=>s+x.amount_czk,0)
   const wTotalContrib = wMyC + wPartnerC
+  // Capital fund tracking
+  // Capital deployed = cost of all active (unsold) inventory items
+  const capitalInInventory = inventory
+    .filter(i => i.status !== 'sold')
+    .reduce((s, i) => s + (i.purchase_czk||0) + (i.supplier_shipping_czk||0) + (i.service_czk||0), 0)
+  // Capital recovered = cost of sold inventory (came back as revenue)
+  const capitalRecovered = inventory
+    .filter(i => i.status === 'sold')
+    .reduce((s, i) => s + (i.purchase_czk||0) + (i.supplier_shipping_czk||0) + (i.service_czk||0), 0)
+  const freeCapital = wTotalContrib - capitalInInventory
 
   // All-time balance = Joint net + Watch profit (capital is already inside profit via costs)
   const allBalance   = (allJIn - allJOut) + allBizProfit
@@ -222,21 +238,38 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
                 <div style={{ fontSize:20, fontWeight:800, color:'var(--red)' }}>{f(bCosts)}</div>
               </div>
             </div>
-            {/* Capital invested — from Watch Contributions */}
+            {/* Capital fund tracker */}
             {wTotalContrib > 0 && (
-              <div style={{ background:'rgba(96,165,250,.07)', border:'1px solid rgba(96,165,250,.18)', borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ background:'rgba(96,165,250,.07)', border:'1px solid rgba(96,165,250,.2)', borderRadius:10, padding:'12px 14px', marginBottom:10 }}>
+                <div style={{ fontSize:10, color:'var(--blue)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:10 }}>Capital fund</div>
+                {/* Three rows: contributed / in inventory / free */}
+                <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:10 }}>
+                  {[
+                    { l:'Total contributed', v:wTotalContrib, c:'var(--blue)', sub:myName+' '+f(wMyC)+' · '+partnerName+' '+f(wPartnerC) },
+                    { l:'Tied up in inventory', v:capitalInInventory, c:'var(--gold)', sub:inventory.filter(i=>i.status!=='sold').length+' unsold watches' },
+                    { l:'Free to deploy', v:freeCapital, c:freeCapital>=0?'var(--green)':'var(--red)', sub:freeCapital<0?'overspent by '+f(Math.abs(freeCapital)):'available capital' },
+                  ].map(row=>(
+                    <div key={row.l} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,.05)' }}>
+                      <div>
+                        <div style={{ fontSize:11, fontWeight:600, color:'var(--muted)' }}>{row.l}</div>
+                        <div style={{ fontSize:10, color:'var(--faint)', fontWeight:500, marginTop:1 }}>{row.sub}</div>
+                      </div>
+                      <div style={{ fontSize:15, fontWeight:800, color:row.c }}>{row.v>=0?'':'-'}{f(Math.abs(row.v))}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Visual bar: how much of capital is deployed */}
+                {wTotalContrib > 0 && (
                   <div>
-                    <div style={{ fontSize:10, color:'var(--blue)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:3 }}>Capital invested</div>
-                    <div style={{ fontSize:11, color:'var(--muted)', fontWeight:500 }}>money put into the business · already in costs</div>
-                  </div>
-                  <div style={{ textAlign:'right' }}>
-                    <div style={{ fontSize:18, fontWeight:800, color:'var(--blue)' }}>{f(wTotalContrib)}</div>
-                    <div style={{ fontSize:10, color:'var(--muted)', fontWeight:500, marginTop:2 }}>
-                      {myName} {f(wMyC)} · {partnerName} {f(wPartnerC)}
+                    <div className="bar-track" style={{ height:7 }}>
+                      <div className="bar-fill" style={{ width:Math.min(Math.round(capitalInInventory/wTotalContrib*100),100)+'%', background:'var(--gold)' }}/>
+                    </div>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'var(--muted)', marginTop:4, fontWeight:600 }}>
+                      <span>{Math.min(Math.round(capitalInInventory/wTotalContrib*100),100)}% deployed in watches</span>
+                      <span>{Math.max(0,Math.round(freeCapital/wTotalContrib*100))}% free</span>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
             {pSales.length>0&&<div style={{ background:'var(--surface2)', borderRadius:9, padding:'10px 12px', border:'1px solid var(--border)', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
