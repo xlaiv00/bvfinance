@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from '@/components/ToastProvider'
-import { fmtDate, EXPENSE_CATS, today } from '@/types'
+import { fmtDate, EXPENSE_CATS, INCOME_CATS, today } from '@/types'
 import { useCurrencyRates, toCZKr, fromCZKr, fmtR } from '@/hooks/useCurrencyRates'
 
 type Cur = 'CZK'|'EUR'
@@ -25,7 +25,7 @@ export default function FinancesClient({ householdId, myName, partnerName }: { h
   const [eCat, setECat] = useState('Groceries'); const [eWho, setEWho] = useState('joint'); const [eDate, setEDate] = useState(today())
   // Income form
   const [iDesc, setIDesc] = useState(''); const [iAmt, setIAmt] = useState(''); const [iCur, setICur] = useState<Cur>('CZK')
-  const [iWho, setIWho] = useState('you'); const [iDate, setIDate] = useState(today())
+  const [iWho, setIWho] = useState('you'); const [iDate, setIDate] = useState(today()); const [iCat, setICat] = useState('Joint Contribution')
 
   const supabase = createClient()
   const f = (czk: number) => fmtR(czk, cur, rates)
@@ -136,6 +136,7 @@ export default function FinancesClient({ householdId, myName, partnerName }: { h
               <div className="fg w"><label>Description</label><input value={iDesc} onChange={e=>setIDesc(e.target.value)} placeholder="e.g. May salary" onKeyDown={e=>e.key==='Enter'&&addIncome()} /></div>
               <div className="fg m"><label>Amount</label><input type="number" value={iAmt} onChange={e=>setIAmt(e.target.value)} placeholder="0" min="0" /></div>
               <div className="fg s"><label>Currency</label><select value={iCur} onChange={e=>setICur(e.target.value as Cur)}><option value="CZK">CZK</option><option value="EUR">EUR</option></select></div>
+              <div className="fg m"><label>Category</label><select value={iCat} onChange={e=>setICat(e.target.value)}>{INCOME_CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
               <div className="fg m"><label>Who</label><select value={iWho} onChange={e=>setIWho(e.target.value)}><option value="you">{myName}</option><option value="partner">{partnerName}</option></select></div>
               <div className="fg"><label>Date</label><input type="date" value={iDate} onChange={e=>setIDate(e.target.value)} /></div>
               <button className="add-btn" onClick={addIncome} disabled={loading}>Add</button>

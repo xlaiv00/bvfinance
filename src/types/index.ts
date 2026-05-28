@@ -41,6 +41,9 @@ export const EXPENSE_CATS = [
   'Groceries','Restaurants','Transport','Household','Travel',
   'Entertainment','Health','Utilities','Shopping','Gifts','Other'
 ]
+export const INCOME_CATS = [
+  'Joint Contribution','Watch Contribution','Salary','Freelance','Gift','Other Income'
+]
 export const CAT_EMOJI: Record<string, string> = {
   Groceries:'🛒', Restaurants:'🍽️', Transport:'🚌', Household:'🏠',
   Travel:'✈️', Entertainment:'🎬', Health:'💊', Utilities:'⚡',
