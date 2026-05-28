@@ -63,10 +63,10 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
   const pSales   = filterPeriod(sales)
 
   // Joint P&L
-  const jIn  = pEntries.filter(e=>e.type==='income').reduce((s,x)=>s+x.amount_czk,0)
+  const jIn  = pEntries.filter(e=>e.type==='income'&&e.category!=='Watch Contribution').reduce((s,x)=>s+x.amount_czk,0)
   const jOut = pEntries.filter(e=>e.type==='expense').reduce((s,x)=>s+x.amount_czk,0)
   const jNet = jIn - jOut
-  const allJIn  = entries.filter(e=>e.type==='income').reduce((s,x)=>s+x.amount_czk,0)
+  const allJIn  = entries.filter(e=>e.type==='income'&&e.category!=='Watch Contribution').reduce((s,x)=>s+x.amount_czk,0)
   const allJOut = entries.filter(e=>e.type==='expense').reduce((s,x)=>s+x.amount_czk,0)
 
   // Business P&L
@@ -118,7 +118,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
   const chartData = MONTHS_S.map((m,i) => {
     const me = entries.filter(x => { const d = new Date(x.date+'T12:00:00'); return d.getFullYear()===year&&d.getMonth()===i })
     const ms = sales.filter(x => { const d = new Date(x.date+'T12:00:00'); return d.getFullYear()===year&&d.getMonth()===i })
-    return { m, jIn:me.filter(e=>e.type==='income').reduce((s,x)=>s+x.amount_czk,0), jOut:me.filter(e=>e.type==='expense').reduce((s,x)=>s+x.amount_czk,0), bRev:ms.reduce((s,x)=>s+(x.revenue_czk||0),0) }
+    return { m, jIn:me.filter(e=>e.type==='income'&&e.category!=='Watch Contribution').reduce((s,x)=>s+x.amount_czk,0), jOut:me.filter(e=>e.type==='expense').reduce((s,x)=>s+x.amount_czk,0), bRev:ms.reduce((s,x)=>s+(x.revenue_czk||0),0) }
   })
   const maxBar = Math.max(...chartData.map(d=>Math.max(d.jIn,d.jOut,d.bRev)),1)
   const activeMonths = [...new Set(entries.map(e=>new Date(e.date+'T12:00:00')).filter(d=>d.getFullYear()===year).map(d=>d.getMonth()))]
@@ -245,78 +245,96 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
         </div>
       </div>
 
-      {/* ═══ ZONE 3: CONTRIBUTIONS — SIDE BY SIDE ═══ */}
+      {/* ═══ ZONE 3: CONTRIBUTIONS ═══ */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
-        {/* Joint contributions */}
         {[
-          { key:'joint', title:'🏠 Joint contributions', category:'Joint Contribution', myAmt:jMyC, partnerAmt:jPartnerC, status:jStatus, color1:'#60a5fa', color2:'#a78bfa', adding:jAdding, setAdding:setJAdding, who:jWho, setWho:setJWho, amt:jAmt, setAmt:setJAmt, curr:jCurr, setCurr:setJCurr },
-          { key:'watch', title:'⌚ Watch contributions', category:'Watch Contribution', myAmt:wMyC, partnerAmt:wPartnerC, status:wStatus, color1:'#fbbf24', color2:'#f97316', adding:bAdding, setAdding:setBAdding, who:bWho, setWho:setBWho, amt:bAmt, setAmt:setBAmt, curr:bCurr, setCurr:setBCurr },
-        ].map(card=>(
-          <div key={card.key} style={{ background:'var(--surface)', border:'1px solid var(--border2)', borderRadius:14, overflow:'hidden' }}>
-            <div style={{ padding:'13px 16px', borderBottom:'1px solid var(--border2)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-              <span style={{ fontSize:13, fontWeight:700 }}>{card.title}</span>
-              <button onClick={()=>card.setAdding(!card.adding)} style={{ background:card.adding?'var(--surface2)':'var(--acc2)', border:'1px solid var(--border2)', color:card.adding?'var(--muted)':'#fff', borderRadius:7, padding:'4px 12px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
-                {card.adding?'Cancel':'+ Add'}
-              </button>
-            </div>
-            {card.adding&&(
-              <div style={{ padding:'12px 16px', background:'var(--surface2)', borderBottom:'1px solid var(--border2)', display:'flex', gap:8, alignItems:'flex-end', flexWrap:'wrap' }}>
-                <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-                  <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Who</label>
-                  <select value={card.who} onChange={e=>card.setWho(e.target.value)} style={INP}>
-                    <option value="you">{myName}</option>
-                    <option value="partner">{partnerName}</option>
-                  </select>
-                </div>
-                <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-                  <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Amount</label>
-                  <input type="number" value={card.amt} onChange={e=>card.setAmt(e.target.value)} placeholder="0" style={{ ...INP, width:90 }} onKeyDown={e=>{ if(e.key==='Enter') addContrib(card.category, card.who, card.amt, card.curr, ()=>{ card.setAmt(''); card.setAdding(false) }) }} />
-                </div>
-                <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-                  <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Currency</label>
-                  <select value={card.curr} onChange={e=>card.setCurr(e.target.value)} style={INP}>
-                    <option value="CZK">CZK</option><option value="EUR">EUR</option>
-                  </select>
-                </div>
-                <button onClick={()=>addContrib(card.category, card.who, card.amt, card.curr, ()=>{ card.setAmt(''); card.setAdding(false) })} disabled={saving||!card.amt} style={{ background:'var(--green)', border:'none', color:'#fff', borderRadius:7, padding:'7px 14px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit', opacity:!card.amt?0.5:1 }}>
-                  {saving?'…':'Save'}
+          { key:'joint', title:'🏠 Joint', category:'Joint Contribution', myAmt:jMyC, partnerAmt:jPartnerC, adding:jAdding, setAdding:setJAdding, who:jWho, setWho:setJWho, amt:jAmt, setAmt:setJAmt, curr:jCurr, setCurr:setJCurr, accent:'#60a5fa' },
+          { key:'watch', title:'⌚ Watch Business', category:'Watch Contribution', myAmt:wMyC, partnerAmt:wPartnerC, adding:bAdding, setAdding:setBAdding, who:bWho, setWho:setBWho, amt:bAmt, setAmt:setBAmt, curr:bCurr, setCurr:setBCurr, accent:'#fbbf24' },
+        ].map(card=>{
+          const diff = card.myAmt - card.partnerAmt
+          const balanced = Math.abs(diff) < 100
+          const owesPerson = diff < 0 ? myName : partnerName
+          const owesAmt = Math.abs(diff)
+          const target = Math.max(card.myAmt, card.partnerAmt)
+          return (
+            <div key={card.key} style={{ background:'var(--surface)', border:'1px solid var(--border2)', borderRadius:14, overflow:'hidden' }}>
+              {/* Header */}
+              <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border2)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <span style={{ fontSize:13, fontWeight:700 }}>{card.title} contributions</span>
+                <button onClick={()=>card.setAdding(!card.adding)} style={{ background:card.adding?'transparent':'var(--acc2)', border:'1px solid var(--border2)', color:card.adding?'var(--muted)':'#fff', borderRadius:7, padding:'4px 12px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
+                  {card.adding?'✕':'+ Add'}
                 </button>
               </div>
-            )}
-            <div style={{ padding:'14px 16px' }}>
-              {(card.myAmt===0&&card.partnerAmt===0)
-                ? <div style={{ fontSize:12, color:'var(--muted)', fontWeight:500, textAlign:'center', padding:'8px 0' }}>No contributions yet — click + Add</div>
-                : <>
-                    <div style={{ background:card.status.balanced?'rgba(34,197,94,.08)':'rgba(239,68,68,.08)', border:`1px solid ${card.status.balanced?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'}`, borderRadius:9, padding:'10px 14px', marginBottom:12, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                      <span style={{ fontSize:12, fontWeight:700, color:card.status.balanced?'var(--green)':'var(--red)' }}>
-                        {card.status.balanced?'✓ Balanced':card.status.behindName+' needs to add'}
-                      </span>
-                      {!card.status.balanced&&<span style={{ fontSize:16, fontWeight:800, color:'var(--red)' }}>{f(card.status.diff)}</span>}
-                    </div>
-                    {[{name:myName,contrib:card.myAmt,color:card.color1},{name:partnerName,contrib:card.partnerAmt,color:card.color2}].map(p=>{
-                      const pct = card.status.target>0?Math.min(Math.round(p.contrib/card.status.target*100),100):0
-                      const owes = card.status.target - p.contrib
-                      return (
-                        <div key={p.name} style={{ marginBottom:12 }}>
-                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
-                            <span style={{ fontSize:13, fontWeight:700 }}>{p.name}</span>
-                            <div style={{ textAlign:'right' }}>
-                              <div style={{ fontSize:15, fontWeight:800, color:p.color }}>{f(p.contrib)}</div>
-                              <div style={{ fontSize:10, fontWeight:700, color:owes>100?'var(--red)':'var(--green)' }}>
-                                {owes>100?'needs '+f(owes)+' more':'✓ matched'}
+
+              {/* Add form */}
+              {card.adding&&(
+                <div style={{ padding:'12px 16px', background:'var(--surface2)', borderBottom:'1px solid var(--border2)', display:'flex', gap:8, alignItems:'flex-end', flexWrap:'wrap' }}>
+                  <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                    <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Who</label>
+                    <select value={card.who} onChange={e=>card.setWho(e.target.value)} style={INP}>
+                      <option value="you">{myName}</option>
+                      <option value="partner">{partnerName}</option>
+                    </select>
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                    <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Amount</label>
+                    <input type="number" value={card.amt} onChange={e=>card.setAmt(e.target.value)} placeholder="0" style={{ ...INP, width:90 }} onKeyDown={e=>{ if(e.key==='Enter'&&card.amt) addContrib(card.category, card.who, card.amt, card.curr, ()=>{ card.setAmt(''); card.setAdding(false) }) }} autoFocus />
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                    <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Currency</label>
+                    <select value={card.curr} onChange={e=>card.setCurr(e.target.value)} style={INP}>
+                      <option value="CZK">CZK</option><option value="EUR">EUR</option>
+                    </select>
+                  </div>
+                  <button onClick={()=>{ if(card.amt) addContrib(card.category, card.who, card.amt, card.curr, ()=>{ card.setAmt(''); card.setAdding(false) }) }} disabled={saving||!card.amt} style={{ background:'var(--green)', border:'none', color:'#fff', borderRadius:7, padding:'7px 16px', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit', opacity:!card.amt?0.4:1 }}>
+                    {saving?'…':'Save'}
+                  </button>
+                </div>
+              )}
+
+              <div style={{ padding:'14px 16px' }}>
+                {(card.myAmt===0&&card.partnerAmt===0)
+                  ? <div style={{ fontSize:12, color:'var(--muted)', textAlign:'center', padding:'12px 0' }}>No contributions yet</div>
+                  : <>
+                      {/* Two people, side by side amounts */}
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
+                        {[{name:myName,amt:card.myAmt,color:card.accent==='#60a5fa'?'#60a5fa':'#fbbf24'},{name:partnerName,amt:card.partnerAmt,color:card.accent==='#60a5fa'?'#a78bfa':'#f97316'}].map(p=>{
+                          const pct = target>0?Math.min(Math.round(p.amt/target*100),100):100
+                          const isAhead = p.amt >= target - 100
+                          return (
+                            <div key={p.name} style={{ background:'var(--surface2)', borderRadius:10, padding:'12px 14px', border:`1px solid ${isAhead?'rgba(34,197,94,.2)':'var(--border)'}` }}>
+                              <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:4 }}>{p.name}</div>
+                              <div style={{ fontSize:20, fontWeight:800, color:p.color, marginBottom:8 }}>{f(p.amt)}</div>
+                              <div className="bar-track" style={{ height:5 }}>
+                                <div className="bar-fill" style={{ width:pct+'%', background:p.color }}/>
+                              </div>
+                              <div style={{ fontSize:10, color:isAhead?'var(--green)':'var(--muted)', fontWeight:700, marginTop:4 }}>
+                                {isAhead?'✓ matched':''+Math.round((target-p.amt))+'...'}
                               </div>
                             </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Status line — dead simple */}
+                      {balanced
+                        ? <div style={{ background:'rgba(34,197,94,.1)', border:'1px solid rgba(34,197,94,.25)', borderRadius:9, padding:'10px 14px', textAlign:'center' }}>
+                            <span style={{ fontSize:13, fontWeight:700, color:'var(--green)' }}>✓ Perfectly balanced</span>
                           </div>
-                          <div className="bar-track" style={{ height:6 }}><div className="bar-fill" style={{ width:pct+'%', background:p.color }}/></div>
-                          <div style={{ fontSize:10, color:'var(--muted)', marginTop:3, fontWeight:600, textAlign:'right' }}>target: {f(card.status.target)}</div>
-                        </div>
-                      )
-                    })}
-                  </>
-              }
+                        : <div style={{ background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.25)', borderRadius:9, padding:'10px 16px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                            <div>
+                              <div style={{ fontSize:11, color:'var(--red)', fontWeight:600, marginBottom:1 }}>{owesPerson} needs to add</div>
+                              <div style={{ fontSize:10, color:'rgba(239,68,68,.6)', fontWeight:500 }}>to match {owesPerson===myName?partnerName:myName}</div>
+                            </div>
+                            <div style={{ fontSize:22, fontWeight:800, color:'var(--red)' }}>{f(owesAmt)}</div>
+                          </div>
+                      }
+                    </>
+                }
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* ═══ ZONE 4: RECENT ACTIVITIES ═══ */}
