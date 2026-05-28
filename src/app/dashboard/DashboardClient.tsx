@@ -75,11 +75,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
   const bCosts  = pSales.reduce((s,x)=>s+(x.watch_cost_czk||0)+(x.sup_shipping_czk||0)+(x.service_czk||0)+(x.shipping_czk||0)+(x.ads_czk||0),0)
   const bProfit = bRev - bCosts
   const allBizProfit = sales.reduce((s,x)=>s+saleProfit(x),0)
-  const allBalance   = (allJIn - allJOut) + allBizProfit
-
-  // ── Contributions — stored in hh_entries, category distinguishes joint vs business ──
-  // Joint contributions: category === 'Joint Contribution'
-  // Business contributions: category === 'Watch Contribution'
+  // ── Contributions ──
   const allManual = entries.filter(e=>e.type==='income'&&e.source==='manual')
   const jContribs = allManual.filter(e=>e.category==='Joint Contribution')
   const jMyC      = jContribs.filter(e=>e.person==='you').reduce((s,x)=>s+x.amount_czk,0)
@@ -87,6 +83,12 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
   const wContribs = allManual.filter(e=>e.category==='Watch Contribution')
   const wMyC      = wContribs.filter(e=>e.person==='you').reduce((s,x)=>s+x.amount_czk,0)
   const wPartnerC = wContribs.filter(e=>e.person==='partner').reduce((s,x)=>s+x.amount_czk,0)
+  const wTotalContrib = wMyC + wPartnerC
+
+  // All-time balance = Joint net + Watch profit (capital is already inside profit via costs)
+  const allBalance   = (allJIn - allJOut) + allBizProfit
+
+
 
   // Correct math: target = whoever contributed more; other person must match
   function contribStatus(myAmt: number, partnerAmt: number, pName: string, mName: string) {
@@ -203,13 +205,14 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
                 <div><div style={{ fontSize:15, fontWeight:800, color:'#fff' }}>Watch Business</div><div style={{ fontSize:11, color:'rgba(255,255,255,.45)', fontWeight:500 }}>sales & operations</div></div>
               </div>
               <div style={{ textAlign:'right' }}>
-                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.05em' }}>PROFIT</div>
+                <div style={{ fontSize:10, color:'rgba(255,255,255,.4)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.05em' }}>PROFIT · {lbl}</div>
                 <div style={{ fontSize:24, fontWeight:800, color:bProfit>=0?'#4ade80':'#f87171', letterSpacing:'-.02em' }}>{bProfit>=0?'+':''}{f(bProfit)}</div>
+                <div style={{ fontSize:11, color:'rgba(255,255,255,.35)', fontWeight:500, marginTop:2 }}>all-time: {f(allBizProfit)}</div>
               </div>
             </div>
           </div>
           <div style={{ padding:'14px 18px' }}>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
               <div style={{ background:'rgba(251,191,36,.07)', border:'1px solid rgba(251,191,36,.18)', borderRadius:10, padding:'12px 14px' }}>
                 <div style={{ fontSize:10, color:'var(--gold)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:5 }}>Revenue</div>
                 <div style={{ fontSize:20, fontWeight:800, color:'var(--gold)' }}>{f(bRev)}</div>
@@ -219,7 +222,24 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
                 <div style={{ fontSize:20, fontWeight:800, color:'var(--red)' }}>{f(bCosts)}</div>
               </div>
             </div>
-            {pSales.length>0&&<div style={{ marginTop:10, background:'var(--surface2)', borderRadius:9, padding:'10px 12px', border:'1px solid var(--border)', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+            {/* Capital invested — from Watch Contributions */}
+            {wTotalContrib > 0 && (
+              <div style={{ background:'rgba(96,165,250,.07)', border:'1px solid rgba(96,165,250,.18)', borderRadius:10, padding:'10px 14px', marginBottom:10 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <div>
+                    <div style={{ fontSize:10, color:'var(--blue)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:3 }}>Capital invested</div>
+                    <div style={{ fontSize:11, color:'var(--muted)', fontWeight:500 }}>money put into the business · already in costs</div>
+                  </div>
+                  <div style={{ textAlign:'right' }}>
+                    <div style={{ fontSize:18, fontWeight:800, color:'var(--blue)' }}>{f(wTotalContrib)}</div>
+                    <div style={{ fontSize:10, color:'var(--muted)', fontWeight:500, marginTop:2 }}>
+                      {myName} {f(wMyC)} · {partnerName} {f(wPartnerC)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {pSales.length>0&&<div style={{ background:'var(--surface2)', borderRadius:9, padding:'10px 12px', border:'1px solid var(--border)', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
               {[{l:'Sales',v:String(pSales.length)},{l:'Avg profit',v:f(bProfit/pSales.length)},{l:'Margin',v:bRev>0?Math.round(bProfit/bRev*100)+'%':'—'}].map(s=>(
                 <div key={s.l} style={{ textAlign:'center' }}><div style={{ fontSize:10, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>{s.l}</div><div style={{ fontSize:13, fontWeight:800 }}>{s.v}</div></div>
               ))}
@@ -228,20 +248,36 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
         </div>
       </div>
 
-      {/* ═══ ZONE 2: COMBINED BAR ═══ */}
-      <div style={{ background:'var(--surface)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px 20px', marginBottom:14 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 1fr', gap:0, alignItems:'center' }}>
-          <div style={{ paddingRight:20 }}>
-            <div style={{ fontSize:10, color:'var(--muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:5 }}>All-time balance</div>
-            <div style={{ fontSize:30, fontWeight:800, color:allBalance>=0?'var(--green)':'var(--red)', letterSpacing:'-.03em', lineHeight:1 }}>{f(allBalance)}</div>
-            <div style={{ fontSize:11, color:'var(--muted)', marginTop:5, fontWeight:500 }}>Joint {f(allJIn-allJOut)} · Business {f(allBizProfit)}</div>
-          </div>
-          {[{l:'Joint net',v:jNet,c:jNet>=0?'var(--green)':'var(--red)'},{l:'Biz profit',v:bProfit,c:bProfit>=0?'var(--green)':'var(--red)'},{l:'Combined',v:jNet+bProfit,c:(jNet+bProfit)>=0?'var(--acc)':'var(--red)'}].map(s=>(
-            <div key={s.l} style={{ textAlign:'center', borderLeft:'1px solid var(--border2)' }}>
-              <div style={{ fontSize:10, color:'var(--muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:5 }}>{s.l} · {lbl}</div>
-              <div style={{ fontSize:20, fontWeight:800, color:s.c }}>{s.v>=0?'+':''}{f(s.v)}</div>
+      {/* ═══ ZONE 2: COMBINED BALANCE ═══ */}
+      <div style={{ background:'var(--surface)', border:'1px solid var(--border2)', borderRadius:14, padding:'18px 20px', marginBottom:14 }}>
+        {/* All-time big number */}
+        <div style={{ marginBottom:16 }}>
+          <div style={{ fontSize:10, color:'var(--muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>All-time balance — everything combined</div>
+          <div style={{ display:'flex', alignItems:'baseline', gap:12, flexWrap:'wrap' }}>
+            <div style={{ fontSize:36, fontWeight:800, color:allBalance>=0?'var(--green)':'var(--red)', letterSpacing:'-.03em', lineHeight:1 }}>{f(allBalance)}</div>
+            <div style={{ display:'flex', gap:16, fontSize:12, fontWeight:600 }}>
+              <span style={{ color:'var(--muted)' }}>Joint <span style={{ color:(allJIn-allJOut)>=0?'var(--green)':'var(--red)' }}>{f(allJIn-allJOut)}</span></span>
+              <span style={{ color:'var(--faint)' }}>+</span>
+              <span style={{ color:'var(--muted)' }}>Watch profit <span style={{ color:allBizProfit>=0?'var(--gold)':'var(--red)' }}>{f(allBizProfit)}</span></span>
             </div>
-          ))}
+          </div>
+        </div>
+        {/* Divider */}
+        <div style={{ borderTop:'1px solid var(--border2)', paddingTop:14 }}>
+          <div style={{ fontSize:10, color:'var(--muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', marginBottom:10 }}>This period — {lbl}</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+            {[
+              { l:'Joint net', v:jNet, sub:'income − expenses', c:jNet>=0?'var(--green)':'var(--red)' },
+              { l:'Watch profit', v:bProfit, sub:'revenue − costs', c:bProfit>=0?'var(--gold)':'var(--red)' },
+              { l:'Combined', v:jNet+bProfit, sub:'joint + watch', c:(jNet+bProfit)>=0?'var(--acc)':'var(--red)' },
+            ].map(s=>(
+              <div key={s.l} style={{ background:'var(--surface2)', borderRadius:10, padding:'12px 14px', border:'1px solid var(--border)' }}>
+                <div style={{ fontSize:10, color:'var(--muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.05em', marginBottom:4 }}>{s.l}</div>
+                <div style={{ fontSize:20, fontWeight:800, color:s.c }}>{s.v>=0?'+':''}{f(s.v)}</div>
+                <div style={{ fontSize:10, color:'var(--faint)', fontWeight:600, marginTop:3 }}>{s.sub}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
