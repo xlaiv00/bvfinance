@@ -15,16 +15,24 @@ interface Inv { id:string; watch_name:string; brand:string; model:string; purcha
 type Form = { date:string; customer:string; watch_name:string; revenue:string; revenue_cur:Cur; watch_cost:string; watch_cost_cur:Cur; sup_shipping:string; sup_shipping_cur:Cur; service:string; service_cur:Cur; shipping:string; shipping_cur:Cur; ads:string; ads_cur:Cur; notes:string }
 const EF = (): Form => ({ date:today(), customer:'', watch_name:'', revenue:'', revenue_cur:'CZK', watch_cost:'', watch_cost_cur:'VND', sup_shipping:'', sup_shipping_cur:'CZK', service:'', service_cur:'CZK', shipping:'', shipping_cur:'CZK', ads:'', ads_cur:'CZK', notes:'' })
 
+interface BizContrib { id:string; person:string; amount_czk:number; display_amount:number; display_currency:string; date:string; note:string }
+
 const STATUS = { in_stock:{l:'🟢 In stock',c:'var(--green)'}, listed:{l:'🟡 Listed',c:'var(--gold)'}, reserved:{l:'🔵 Reserved',c:'var(--blue)'}, sold:{l:'🔴 Sold',c:'var(--red)'} } as any
 
 export default function BusinessClient({ householdId }: { householdId:string }) {
   const [sales, setSales] = useState<Sale[]>([])
   const [inv, setInv] = useState<Inv[]>([])
-  const [tab, setTab] = useState<'sales'|'analytics'|'inventory'>('sales')
+  const [tab, setTab] = useState<'sales'|'analytics'|'inventory'|'contributions'>('sales')
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<string|null>(null)
   const [form, setForm] = useState<Form>(EF())
   const [loading, setLoading] = useState(false)
+  const [contribs, setContribs] = useState<BizContrib[]>([])
+  const [cAmt, setCAmt] = useState('')
+  const [cCur, setCCur] = useState<Cur>('CZK')
+  const [cWho, setCWho] = useState('you')
+  const [cDate, setCDate] = useState(today())
+  const [cNote, setCNote] = useState('')
   const [dc, setDc] = useState<Cur>('CZK')
   const [filterMonth, setFilterMonth] = useState('all')
   // Inventory form state
@@ -57,12 +65,14 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
 
   useEffect(() => { load() }, [])
   async function load() {
-    const [s, i] = await Promise.all([
+    const [s, i, bc] = await Promise.all([
       supabase.from('biz_sales').select('*').eq('household_id', householdId).order('date', { ascending: false }),
       supabase.from('biz_inventory').select('*').eq('household_id', householdId).order('created_at', { ascending: false }),
+      supabase.from('biz_contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }),
     ])
     if (s.data) setSales(s.data as Sale[])
     if (i.data) setInv(i.data as Inv[])
+    if (bc.data) setContribs(bc.data as BizContrib[])
   }
 
   function p(patch: Partial<Form>) { setForm(prev => ({ ...prev, ...patch })) }
@@ -220,7 +230,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
   return (
     <div style={{ paddingBottom:40 }}>
       <div className="tabs">
-        {[['sales','💰 Sales'],['analytics','📈 Analytics'],['inventory','📦 Inventory']].map(([k,l])=>(
+        {[['sales','💰 Sales'],['analytics','📈 Analytics'],['inventory','📦 Inventory'],['contributions','⚖️ Contributions']].map(([k,l])=>(
           <button key={k} className={'tab-btn '+(tab===k?'active':'')} onClick={()=>setTab(k as any)}>{l}</button>
         ))}
       </div>

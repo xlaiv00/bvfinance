@@ -7,12 +7,134 @@ import { useCurrencyRates, fmtR } from '@/hooks/useCurrencyRates'
 interface HHEntry { id:string; type:string; description:string; amount_czk:number; display_amount:number; display_currency:string; category:string; person:string; date:string; source:string; source_id?:string }
 interface BizSale { id:string; date:string; watch_name:string; customer:string; revenue_czk:number; watch_cost_czk:number; sup_shipping_czk:number; service_czk:number; shipping_czk:number; ads_czk:number }
 interface Trip { id:string; name:string; budget_czk:number; date_from?:string; date_to?:string }
+interface BizContrib { id:string; person:string; amount_czk:number; display_amount:number; display_currency:string; date:string; note:string }
 type Cur = 'CZK'|'EUR'
+
+
+interface ContribCardProps {
+  title: string; myName: string; partnerName: string
+  myC: number; partnerC: number; total: number; diff: number
+  color1: string; color2: string; f: (n:number)=>string
+  householdId: string; supabase: any; category: string
+  onAdd: (entry: any) => void
+}
+
+function ContribCard({ title, myName, partnerName, myC, partnerC, total, diff, color1, color2, f, householdId, supabase, category, onAdd }: ContribCardProps) {
+  const [adding, setAdding] = useState(false)
+  const [who, setWho] = useState('you')
+  const [amt, setAmt] = useState('')
+  const [cur, setCur] = useState('CZK')
+  const [loading, setLoading] = useState(false)
+  const rates = useCurrencyRates()
+
+  // target = whatever the OTHER person put in (to match them)
+  const target = Math.max(myC, partnerC)
+  const balanced = Math.abs(diff) < 100
+  // who needs to top up?
+  const behindName  = diff > 0 ? partnerName : myName    // whoever put in less
+  const behindOwes  = Math.abs(diff)
+
+  async function add() {
+    if (!amt) return
+    setLoading(true)
+    const a = parseFloat(amt)
+    const czk = a * (cur==='EUR'?rates.EUR_CZK:cur==='USD'?rates.USD_CZK:1)
+    const { data } = await supabase.from('hh_entries').insert({
+      household_id: householdId, type:'income',
+      description: (who==='you'?myName:partnerName)+' — '+category,
+      amount_czk: czk, display_amount: a, display_currency: cur,
+      category, person: who, date: new Date().toISOString().split('T')[0], source:'manual'
+    }).select().single()
+    if (data) onAdd(data)
+    setAmt(''); setAdding(false); setLoading(false)
+  }
+
+  const INP: React.CSSProperties = { background:'var(--surface3)', border:'1px solid var(--border2)', borderRadius:7, padding:'6px 9px', fontSize:12, color:'var(--text)', fontFamily:'inherit', outline:'none' }
+
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border2)', borderRadius:14, overflow:'hidden' }}>
+      <div style={{ padding:'13px 16px', borderBottom:'1px solid var(--border2)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <span style={{ fontSize:13, fontWeight:700 }}>{title}</span>
+        <button onClick={()=>setAdding(a=>!a)} style={{ background:'var(--acc2)', border:'none', color:'#fff', borderRadius:7, padding:'4px 12px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
+          {adding?'Cancel':'+ Add'}
+        </button>
+      </div>
+
+      {adding && (
+        <div style={{ padding:'12px 16px', background:'var(--surface2)', borderBottom:'1px solid var(--border2)', display:'flex', gap:8, alignItems:'flex-end', flexWrap:'wrap' }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+            <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Who</label>
+            <select value={who} onChange={e=>setWho(e.target.value)} style={INP}>
+              <option value="you">{myName}</option>
+              <option value="partner">{partnerName}</option>
+            </select>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+            <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Amount</label>
+            <input type="number" value={amt} onChange={e=>setAmt(e.target.value)} placeholder="0" style={{ ...INP, width:90 }} onKeyDown={e=>e.key==='Enter'&&add()} />
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+            <label style={{ fontSize:10, color:'var(--muted)', fontWeight:700 }}>Currency</label>
+            <select value={cur} onChange={e=>setCur(e.target.value)} style={INP}>
+              <option value="CZK">CZK</option><option value="EUR">EUR</option>
+            </select>
+          </div>
+          <button onClick={add} disabled={loading||!amt} style={{ background:'var(--green)', border:'none', color:'#fff', borderRadius:7, padding:'7px 14px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit', opacity:!amt?.5:1 }}>
+            {loading?'...':'Save'}
+          </button>
+        </div>
+      )}
+
+      <div style={{ padding:'14px 16px' }}>
+        {total === 0 ? (
+          <div style={{ fontSize:12, color:'var(--muted)', fontWeight:500, textAlign:'center', padding:'8px 0' }}>No contributions yet</div>
+        ) : (
+          <>
+            {/* Status banner */}
+            <div style={{ background:balanced?'rgba(34,197,94,.08)':'rgba(239,68,68,.08)', border:`1px solid ${balanced?'rgba(34,197,94,.2)':'rgba(239,68,68,.2)'}`, borderRadius:9, padding:'10px 14px', marginBottom:12, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontSize:12, fontWeight:700, color:balanced?'var(--green)':'var(--red)' }}>
+                {balanced ? '✓ Balanced' : behindName+' still needs to add'}
+              </span>
+              {!balanced && <span style={{ fontSize:16, fontWeight:800, color:'var(--red)' }}>{f(behindOwes)}</span>}
+            </div>
+            {/* Per person */}
+            {[
+              { name:myName, contrib:myC, color:color1 },
+              { name:partnerName, contrib:partnerC, color:color2 },
+            ].map(p => {
+              const pct = target>0?Math.min(Math.round(p.contrib/target*100),100):0
+              const thisOwes = target - p.contrib
+              return (
+                <div key={p.name} style={{ marginBottom:12 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
+                    <span style={{ fontSize:13, fontWeight:700, color:'var(--text)' }}>{p.name}</span>
+                    <div style={{ textAlign:'right' }}>
+                      <span style={{ fontSize:15, fontWeight:800, color:p.color }}>{f(p.contrib)}</span>
+                      {thisOwes > 100 && <div style={{ fontSize:10, color:'var(--red)', fontWeight:700 }}>needs {f(thisOwes)} more</div>}
+                      {thisOwes <= 100 && <div style={{ fontSize:10, color:'var(--green)', fontWeight:700 }}>✓ matched</div>}
+                    </div>
+                  </div>
+                  <div className="bar-track" style={{ height:6 }}>
+                    <div className="bar-fill" style={{ width:pct+'%', background:p.color }}/>
+                  </div>
+                  <div style={{ fontSize:10, color:'var(--muted)', marginTop:3, fontWeight:600, textAlign:'right' }}>
+                    target: {f(target)}
+                  </div>
+                </div>
+              )
+            })}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function DashboardClient({ householdId, myName, partnerName }: { householdId:string; myName:string; partnerName:string }) {
   const [entries, setEntries] = useState<HHEntry[]>([])
   const [sales, setSales] = useState<BizSale[]>([])
   const [trips, setTrips] = useState<Trip[]>([])
+  const [bizContribs, setBizContribs] = useState<BizContrib[]>([])
   const [loading, setLoading] = useState(true)
   const [cur, setCur] = useState<Cur>(() => typeof window !== 'undefined' ? (localStorage.getItem('cur') as Cur||'CZK') : 'CZK')
   const [year, setYear] = useState(new Date().getFullYear())
@@ -24,14 +146,16 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
   function saveCur(c: Cur) { setCur(c); localStorage.setItem('cur', c) }
 
   const fetchAll = useCallback(async () => {
-    const [e, s, t] = await Promise.all([
+    const [e, s, t, bc] = await Promise.all([
       supabase.from('hh_entries').select('*').eq('household_id', householdId).order('date', { ascending: false }),
       supabase.from('biz_sales').select('*').eq('household_id', householdId).order('date', { ascending: false }),
       supabase.from('trips').select('*').eq('household_id', householdId).order('created_at', { ascending: false }),
+      supabase.from('biz_contributions').select('*').eq('household_id', householdId).order('date', { ascending: false }),
     ])
     setEntries(e.data || [])
     setSales(s.data || [])
     setTrips(t.data || [])
+    setBizContribs(bc.data || [])
     setLoading(false)
   }, [householdId])
 
@@ -70,14 +194,22 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
   const allBizProfit = sales.reduce((s,x)=>s+saleProfit(x),0)
   const allBalance   = (allJIn - allJOut) + allBizProfit
 
-  // 50/50
-  const allContribs    = entries.filter(e=>e.type==='income'&&e.source==='manual')
-  const myC            = allContribs.filter(e=>e.person==='you').reduce((s,x)=>s+x.amount_czk,0)
-  const partnerC       = allContribs.filter(e=>e.person==='partner').reduce((s,x)=>s+x.amount_czk,0)
-  const totalC         = myC + partnerC
-  const fairShare      = totalC / 2
-  const myOwes         = fairShare - myC
-  const partnerOwes    = fairShare - partnerC
+  // 50/50 — split joint vs business contributions
+  const allContribs = entries.filter(e=>e.type==='income'&&e.source==='manual')
+  // Joint contributions = category is NOT 'Business Contribution'
+  const jContribs     = allContribs.filter(e=>e.category!=='Business Contribution')
+  const jMyC          = jContribs.filter(e=>e.person==='you').reduce((s,x)=>s+x.amount_czk,0)
+  const jPartnerC     = jContribs.filter(e=>e.person==='partner').reduce((s,x)=>s+x.amount_czk,0)
+  const jTotal        = jMyC + jPartnerC
+  // Business contributions = category === 'Business Contribution'
+  const bContribs     = allContribs.filter(e=>e.category==='Business Contribution')
+  const bMyC          = bContribs.filter(e=>e.person==='you').reduce((s,x)=>s+x.amount_czk,0)
+  const bPartnerC     = bContribs.filter(e=>e.person==='partner').reduce((s,x)=>s+x.amount_czk,0)
+  const bTotal        = bMyC + bPartnerC
+  // Correct math: owe = difference to match whoever put in more
+  // e.g. partner puts 5000, I put 3000 → I owe 2000 (not 1000)
+  const jDiff  = jMyC - jPartnerC   // positive = partner owes me, negative = I owe partner
+  const bDiff  = bMyC - bPartnerC
 
   // Unified feed — merge joint + biz, sort by date, take 8
   type FeedItem = { id:string; date:string; label:string; sub:string; amount:string; amtColor:string; icon:string; iconBg:string; iconBorder:string }
@@ -261,48 +393,105 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
       </div>
 
       {/* ═══════════════════════════════
-          ZONE 3 — CONTRIBUTIONS
+          ZONE 3 — CONTRIBUTIONS (split)
       ═══════════════════════════════ */}
-      <div style={{ background:'var(--surface)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px 20px', marginBottom:14 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
-          <div style={{ fontSize:13, fontWeight:700 }}>⚖️ 50/50 Contributions — all time</div>
-          <div style={{ fontSize:12, fontWeight:700, color:'var(--acc)' }}>Fair share: {f(fairShare)} each</div>
-        </div>
-        {totalC === 0
-          ? <div style={{ fontSize:12, color:'var(--muted)', fontWeight:500 }}>No contributions recorded yet — add income in Joint</div>
-          : <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-              {[
-                { name:myName, contrib:myC, owes:myOwes, color:'#60a5fa' },
-                { name:partnerName, contrib:partnerC, owes:partnerOwes, color:'#a78bfa' },
-              ].map(p=>{
-                const pct = totalC>0?Math.round(p.contrib/totalC*100):0
-                const balanced = Math.abs(p.owes) < 100
-                return (
-                  <div key={p.name} style={{ background:'var(--surface2)', borderRadius:10, padding:'14px 16px', border:'1px solid var(--border)' }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
-                      <div>
-                        <div style={{ fontSize:13, fontWeight:800, color:'var(--text)', marginBottom:2 }}>{p.name}</div>
-                        <div style={{ fontSize:11, color:'var(--muted)', fontWeight:500 }}>{pct}% of total</div>
-                      </div>
-                      <div style={{ textAlign:'right' }}>
-                        <div style={{ fontSize:18, fontWeight:800, color:p.color }}>{f(p.contrib)}</div>
-                        <div style={{ fontSize:11, fontWeight:700, marginTop:2, color:balanced?'var(--green)':p.owes>0?'var(--red)':'var(--green)' }}>
-                          {balanced ? '✓ balanced' : p.owes>0 ? 'owes '+f(p.owes) : '+'+f(Math.abs(p.owes))+' extra'}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
+
+        {/* Joint contributions */}
+        <div style={{ background:'var(--surface)', border:'1px solid rgba(96,165,250,.3)', borderRadius:14, overflow:'hidden' }}>
+          <div style={{ background:'linear-gradient(135deg,#1a2d4a 0%,#111e30 100%)', padding:'12px 18px', borderBottom:'1px solid rgba(96,165,250,.2)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <div style={{ fontSize:13, fontWeight:800, color:'#fff' }}>🏠 Joint contributions</div>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', fontWeight:600 }}>all time</div>
+          </div>
+          <div style={{ padding:'14px 18px' }}>
+            {totalC === 0
+              ? <div style={{ fontSize:12, color:'var(--muted)', fontWeight:500 }}>No contributions yet — add income in Joint tab</div>
+              : <>
+                  {[
+                    { name:myName, contrib:myC, color:'#60a5fa', diff: jDiff },
+                    { name:partnerName, contrib:partnerC, color:'#a78bfa', diff: -jDiff },
+                  ].map(p=>{
+                    const target = Math.max(myC, partnerC)
+                    const owes = target - p.contrib
+                    const balanced = Math.abs(owes) < 100
+                    return (
+                      <div key={p.name} style={{ marginBottom:14 }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                          <span style={{ fontSize:13, fontWeight:700, color:'var(--text)' }}>{p.name}</span>
+                          <div style={{ textAlign:'right' }}>
+                            <div style={{ fontSize:16, fontWeight:800, color:p.color }}>{f(p.contrib)}</div>
+                            <div style={{ fontSize:11, fontWeight:700, color:balanced?'var(--green)':owes>0?'var(--red)':'var(--green)' }}>
+                              {balanced?'✓ balanced':owes>0?'owes '+f(owes):'+'+f(Math.abs(owes))+' extra'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="bar-track" style={{ height:6 }}>
+                          <div className="bar-fill" style={{ width:target>0?Math.round(p.contrib/target*100)+'%':'0%', background:p.color }}/>
                         </div>
                       </div>
-                    </div>
-                    <div className="bar-track" style={{ height:6 }}>
-                      <div className="bar-fill" style={{ width:pct+'%', background:p.color }}/>
-                    </div>
-                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'var(--muted)', marginTop:5, fontWeight:600 }}>
-                      <span>contributed</span>
-                      <span>target: {f(fairShare)}</span>
-                    </div>
+                    )
+                  })}
+                  <div style={{ borderTop:'1px solid var(--border)', paddingTop:10, display:'flex', justifyContent:'space-between', fontSize:12 }}>
+                    <span style={{ color:'var(--muted)', fontWeight:600 }}>Total contributed</span>
+                    <span style={{ fontWeight:800 }}>{f(totalC)}</span>
                   </div>
-                )
-              })}
-            </div>
-        }
+                  {Math.abs(jDiff) >= 100 && (
+                    <div style={{ marginTop:8, background:jDiff>0?'rgba(251,191,36,.08)':'rgba(251,191,36,.08)', border:'1px solid rgba(251,191,36,.2)', borderRadius:8, padding:'8px 12px', fontSize:12, fontWeight:700, color:'var(--gold)', textAlign:'center' }}>
+                      {jDiff>0 ? `${partnerName} needs to add ${f(Math.abs(jDiff))} to match` : `${myName} needs to add ${f(Math.abs(jDiff))} to match`}
+                    </div>
+                  )}
+                </>
+            }
+          </div>
+        </div>
+
+        {/* Business contributions */}
+        <div style={{ background:'var(--surface)', border:'1px solid rgba(251,191,36,.3)', borderRadius:14, overflow:'hidden' }}>
+          <div style={{ background:'linear-gradient(135deg,#3d2000 0%,#271500 100%)', padding:'12px 18px', borderBottom:'1px solid rgba(251,191,36,.2)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <div style={{ fontSize:13, fontWeight:800, color:'#fff' }}>⌚ Business contributions</div>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,.5)', fontWeight:600 }}>all time</div>
+          </div>
+          <div style={{ padding:'14px 18px' }}>
+            {myBizC === 0 && partnerBizC === 0
+              ? <div style={{ fontSize:12, color:'var(--muted)', fontWeight:500 }}>No business contributions yet — add in Watch Business tab</div>
+              : <>
+                  {[
+                    { name:myName, contrib:myBizC, color:'#60a5fa' },
+                    { name:partnerName, contrib:partnerBizC, color:'#a78bfa' },
+                  ].map(p=>{
+                    const target = Math.max(myBizC, partnerBizC)
+                    const owes = target - p.contrib
+                    const balanced = Math.abs(owes) < 100
+                    return (
+                      <div key={p.name} style={{ marginBottom:14 }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                          <span style={{ fontSize:13, fontWeight:700, color:'var(--text)' }}>{p.name}</span>
+                          <div style={{ textAlign:'right' }}>
+                            <div style={{ fontSize:16, fontWeight:800, color:p.color }}>{f(p.contrib)}</div>
+                            <div style={{ fontSize:11, fontWeight:700, color:balanced?'var(--green)':owes>0?'var(--red)':'var(--green)' }}>
+                              {balanced?'✓ balanced':owes>0?'owes '+f(owes):'+'+f(Math.abs(owes))+' extra'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="bar-track" style={{ height:6 }}>
+                          <div className="bar-fill" style={{ width:target>0?Math.round(p.contrib/target*100)+'%':'0%', background:p.color }}/>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <div style={{ borderTop:'1px solid var(--border)', paddingTop:10, display:'flex', justifyContent:'space-between', fontSize:12 }}>
+                    <span style={{ color:'var(--muted)', fontWeight:600 }}>Total invested</span>
+                    <span style={{ fontWeight:800 }}>{f(myBizC+partnerBizC)}</span>
+                  </div>
+                  {Math.abs(bizDiff) >= 100 && (
+                    <div style={{ marginTop:8, background:'rgba(251,191,36,.08)', border:'1px solid rgba(251,191,36,.2)', borderRadius:8, padding:'8px 12px', fontSize:12, fontWeight:700, color:'var(--gold)', textAlign:'center' }}>
+                      {bizDiff>0 ? `${partnerName} needs to invest ${f(Math.abs(bizDiff))} to match` : `${myName} needs to invest ${f(Math.abs(bizDiff))} to match`}
+                    </div>
+                  )}
+                </>
+            }
+          </div>
+        </div>
       </div>
 
       {/* ═══════════════════════════════
