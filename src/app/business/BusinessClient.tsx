@@ -171,7 +171,8 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
     const revCZK = tc(parseFloat(sellRevenue)||0, sellRevCur)
     const shipCZK = tc(parseFloat(sellShipping)||0, sellShipCur)
     const adsCZK = tc(parseFloat(sellAds)||0, sellAdsCur)
-    const profit = revCZK - sellInv.purchase_czk - (sellInv.supplier_shipping_czk||0) - (sellInv.service_czk||0) - shipCZK - adsCZK
+    const totalInvCost = sellInv.purchase_czk + (sellInv.supplier_shipping_czk||0) + (sellInv.service_czk||0)
+    const profit = revCZK - totalInvCost - shipCZK - adsCZK
 
     // 1. Create sale record
     const { data: saleData } = await supabase.from('biz_sales').insert({
@@ -213,7 +214,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
   // Inventory stats
   const inStockInv = inv.filter(i=>i.status==='in_stock').length
   const listedInv = inv.filter(i=>i.status==='listed').length
-  const invVal = inv.filter(i=>i.status!=='sold').reduce((s,i)=>s+i.purchase_czk,0)
+  const invVal = inv.filter(i=>i.status!=='sold').reduce((s,i)=>s+i.purchase_czk+(i.supplier_shipping_czk||0)+(i.service_czk||0),0)
   const potRev = inv.filter(i=>i.status!=='sold'&&i.asking_czk>0).reduce((s,i)=>s+i.asking_czk,0)
 
   return (
@@ -500,7 +501,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
             <tbody>
               {inv.length===0?<tr><td colSpan={7} style={{ padding:24, textAlign:'center', color:'var(--muted)' }}>No watches yet</td></tr>:
               inv.map((item,i)=>{
-                const pot=item.asking_czk-item.purchase_czk; const pm=item.asking_czk>0?Math.round(pot/item.asking_czk*100):0
+                const totalCost=item.purchase_czk+(item.supplier_shipping_czk||0)+(item.service_czk||0); const pot=item.asking_czk-totalCost; const pm=item.asking_czk>0?Math.round(pot/item.asking_czk*100):0
                 return <tr key={item.id} style={{ borderBottom:i<inv.length-1?'0.5px solid var(--border)':'none', cursor:'pointer', opacity:item.status==='sold'?.5:1 }} onClick={()=>openEditInv(item)}>
                   <td style={{ padding:'9px 12px', fontWeight:500, maxWidth:130, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{item.watch_name}</td>
                   <td style={{ padding:'9px 12px', color:'var(--muted)' }}>{item.brand}{item.model&&<div style={{ fontSize:10, color:'var(--faint)' }}>{item.model}</div>}</td>
@@ -558,7 +559,7 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
                 <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Watch</div><div style={{ fontSize:12, fontWeight:500 }}>{sellInv.watch_name}</div></div>
                 <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Brand</div><div style={{ fontSize:12 }}>{sellInv.brand||'—'}</div></div>
-                <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Bought for</div><div style={{ fontSize:12, fontWeight:500, color:'var(--red)' }}>{sellInv.purchase_czk>0?fmtC(sellInv.purchase_czk,'CZK'):'—'}{sellInv.purchase_cur!=='CZK'&&<span style={{ fontSize:10, color:'var(--muted)', display:'block' }}>{fmtOrig(sellInv.purchase_czk,sellInv.purchase_cur,rates)}</span>}</div></div>
+                <div><div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Total cost</div><div style={{ fontSize:12, fontWeight:500, color:'var(--red)' }}>{fmtC(sellInv.purchase_czk+(sellInv.supplier_shipping_czk||0)+(sellInv.service_czk||0),'CZK')}<div style={{ fontSize:10, color:'var(--muted)' }}>buy {fmtC(sellInv.purchase_czk,'CZK')} + ship {fmtC(sellInv.supplier_shipping_czk||0,'CZK')} + svc {fmtC(sellInv.service_czk||0,'CZK')}</div></div></div>
               </div>
             </div>
 
@@ -593,7 +594,8 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
                   const rev = tc(parseFloat(sellRevenue)||0, sellRevCur)
                   const ship = tc(parseFloat(sellShipping)||0, sellShipCur)
                   const ads = tc(parseFloat(sellAds)||0, sellAdsCur)
-                  const profit = rev - sellInv.purchase_czk - ship - ads
+                  const totalIC = sellInv.purchase_czk+(sellInv.supplier_shipping_czk||0)+(sellInv.service_czk||0)
+                  const profit = rev - totalIC - ship - ads
                   const m = rev > 0 ? Math.round(profit/rev*100) : 0
                   return (
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
