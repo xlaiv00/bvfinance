@@ -182,37 +182,7 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
                 <div style={{ fontSize:20, fontWeight:800, color:'var(--red)' }}>{f(jOut)}</div>
               </div>
             </div>
-            {/* 50/50 */}
-            {totalC > 0 && (
-              <div style={{ background:'var(--surface2)', borderRadius:10, padding:'12px 14px', border:'1px solid var(--border)' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-                  <span style={{ fontSize:10, color:'var(--muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em' }}>50/50 balance</span>
-                  <span style={{ fontSize:11, color:'var(--acc)', fontWeight:700 }}>fair share {f(fairShare)} each</span>
-                </div>
-                {[
-                  { name:myName, contrib:myC, owes:myOwes, color:'#60a5fa' },
-                  { name:partnerName, contrib:partnerC, owes:partnerOwes, color:'#a78bfa' },
-                ].map(p=>{
-                  const pct = totalC>0?Math.round(p.contrib/totalC*100):0
-                  return (
-                    <div key={p.name} style={{ marginBottom:8 }}>
-                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
-                        <span style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{p.name}</span>
-                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                          <span style={{ fontSize:11, fontWeight:700, color:Math.abs(p.owes)<100?'var(--green)':p.owes>0?'var(--red)':'var(--green)' }}>
-                            {Math.abs(p.owes)<100?'✓ balanced':p.owes>0?'owes '+f(p.owes):'+'+f(Math.abs(p.owes))+' extra'}
-                          </span>
-                          <span style={{ fontSize:14, fontWeight:800, color:p.color }}>{f(p.contrib)}</span>
-                        </div>
-                      </div>
-                      <div className="bar-track" style={{ height:5 }}>
-                        <div className="bar-fill" style={{ width:pct+'%', background:p.color }}/>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+
           </div>
         </div>
 
@@ -291,28 +261,75 @@ export default function DashboardClient({ householdId, myName, partnerName }: { 
       </div>
 
       {/* ═══════════════════════════════
-          ZONE 3 — UNIFIED FEED + TRIPS
+          ZONE 3 — CONTRIBUTIONS
+      ═══════════════════════════════ */}
+      <div style={{ background:'var(--surface)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px 20px', marginBottom:14 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
+          <div style={{ fontSize:13, fontWeight:700 }}>⚖️ 50/50 Contributions — all time</div>
+          <div style={{ fontSize:12, fontWeight:700, color:'var(--acc)' }}>Fair share: {f(fairShare)} each</div>
+        </div>
+        {totalC === 0
+          ? <div style={{ fontSize:12, color:'var(--muted)', fontWeight:500 }}>No contributions recorded yet — add income in Joint</div>
+          : <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              {[
+                { name:myName, contrib:myC, owes:myOwes, color:'#60a5fa' },
+                { name:partnerName, contrib:partnerC, owes:partnerOwes, color:'#a78bfa' },
+              ].map(p=>{
+                const pct = totalC>0?Math.round(p.contrib/totalC*100):0
+                const balanced = Math.abs(p.owes) < 100
+                return (
+                  <div key={p.name} style={{ background:'var(--surface2)', borderRadius:10, padding:'14px 16px', border:'1px solid var(--border)' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
+                      <div>
+                        <div style={{ fontSize:13, fontWeight:800, color:'var(--text)', marginBottom:2 }}>{p.name}</div>
+                        <div style={{ fontSize:11, color:'var(--muted)', fontWeight:500 }}>{pct}% of total</div>
+                      </div>
+                      <div style={{ textAlign:'right' }}>
+                        <div style={{ fontSize:18, fontWeight:800, color:p.color }}>{f(p.contrib)}</div>
+                        <div style={{ fontSize:11, fontWeight:700, marginTop:2, color:balanced?'var(--green)':p.owes>0?'var(--red)':'var(--green)' }}>
+                          {balanced ? '✓ balanced' : p.owes>0 ? 'owes '+f(p.owes) : '+'+f(Math.abs(p.owes))+' extra'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bar-track" style={{ height:6 }}>
+                      <div className="bar-fill" style={{ width:pct+'%', background:p.color }}/>
+                    </div>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'var(--muted)', marginTop:5, fontWeight:600 }}>
+                      <span>contributed</span>
+                      <span>target: {f(fairShare)}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+        }
+      </div>
+
+      {/* ═══════════════════════════════
+          ZONE 4 — JOINT ACTIVITY + TRIPS
       ═══════════════════════════════ */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 300px', gap:14, alignItems:'start' }}>
 
-        {/* Unified activity */}
+        {/* Joint recent activity */}
         <div className="card">
-          <div className="card-head">
-            <span className="card-title">Recent activity</span>
-            <span className="card-meta">{lbl} · {feed.length} items</span>
+          <div className="card-head" style={{ borderLeft:'3px solid #60a5fa' }}>
+            <span className="card-title">🏠 Joint — recent activity</span>
+            <span className="card-meta">{pEntries.length} entries · {lbl}</span>
           </div>
           <div className="card-body" style={{ padding:0 }}>
-            {feed.length===0
-              ? <div className="empty">Nothing yet for {lbl}</div>
-              : feed.map(item=>(
-                <div key={item.id} className="tx" style={{ padding:'10px 16px' }}>
-                  <div className="tx-icon" style={{ background:item.iconBg, border:item.iconBorder, fontSize:14 }}>{item.icon}</div>
-                  <div className="tx-info">
-                    <div className="tx-name">{item.label}</div>
-                    <div className="tx-meta">{item.sub}</div>
+            {pEntries.length===0
+              ? <div className="empty">No entries for {lbl}</div>
+              : [...pEntries].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8).map(e=>(
+                <div key={e.id} className="tx" style={{ padding:'10px 16px' }}>
+                  <div className="tx-icon" style={{ background:e.type==='income'?'rgba(96,165,250,.12)':'var(--surface2)', border:e.type==='income'?'1px solid rgba(96,165,250,.25)':'1px solid var(--border2)', fontSize:14 }}>
+                    {e.type==='income'?'↓':(CAT_EMOJI[e.category]||'📦')}
                   </div>
-                  <div className="tx-date">{fmtDate(item.date)}</div>
-                  <div className="tx-amt" style={{ color:item.amtColor }}>{item.amount}</div>
+                  <div className="tx-info">
+                    <div className="tx-name">{e.description}</div>
+                    <div className="tx-meta">{e.category} · {e.person==='you'?myName:e.person==='partner'?partnerName:'Joint'}</div>
+                  </div>
+                  <div className="tx-date">{fmtDate(e.date)}</div>
+                  <div className={'tx-amt '+(e.type==='income'?'pos':'neg')}>{fmtR(e.amount_czk,cur,rates)}</div>
                 </div>
               ))
             }
