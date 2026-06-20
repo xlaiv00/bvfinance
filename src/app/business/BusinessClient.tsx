@@ -57,6 +57,12 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
   const [expDate, setExpDate] = useState(new Date().toISOString().split('T')[0])
   const [showExpForm, setShowExpForm] = useState(false)
   const [capSaving, setCapSaving] = useState(false)
+  // Quick cost modal (from Sales tab)
+  const [showQuickCost, setShowQuickCost] = useState(false)
+  const [qcDesc, setQcDesc] = useState('')
+  const [qcAmt, setQcAmt] = useState('')
+  const [qcCur, setQcCur] = useState('CZK')
+  const [qcDate, setQcDate] = useState(new Date().toISOString().split('T')[0])
 
   const supabase = createClient()
   const rates = useCurrencyRates()
@@ -92,8 +98,12 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
 
   const months = sales.map(s=>s.date?.slice(0,7)).filter((m,i,a):m is string=>Boolean(m)&&a.indexOf(m)===i).sort().reverse()
   const filtered = filterMonth==='all'?sales:sales.filter(s=>s.date?.startsWith(filterMonth))
+  const runningCostsAll = hhEntries.filter(e=>e.category==='Business Expense')
+  const filteredRunningCosts = filterMonth==='all'?runningCostsAll:runningCostsAll.filter((e:any)=>e.date?.startsWith(filterMonth))
+  const totRunningCost = filteredRunningCosts.reduce((s:number,x:any)=>s+x.amount_czk,0)
   const totRev = filtered.reduce((s,x)=>s+(x.revenue_czk||0),0)
-  const totCost = filtered.reduce((s,x)=>s+(x.watch_cost_czk||0)+(x.sup_shipping_czk||0)+(x.service_czk||0)+(x.shipping_czk||0)+(x.ads_czk||0),0)
+  const totSaleCost = filtered.reduce((s,x)=>s+(x.watch_cost_czk||0)+(x.sup_shipping_czk||0)+(x.service_czk||0)+(x.shipping_czk||0)+(x.ads_czk||0),0)
+  const totCost = totSaleCost + totRunningCost
   const totProfit = totRev - totCost
   const margin = totRev>0?Math.round(totProfit/totRev*100):0
 
@@ -187,6 +197,20 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
     setSellAds(''); setSellShipping(''); setSellDate(today())
   }
 
+  async function addQuickCost() {
+    if (!qcAmt || !qcDesc) return
+    setCapSaving(true)
+    const amt = parseFloat(qcAmt)
+    const czk = tc(amt, qcCur)
+    const { data } = await supabase.from('hh_entries').insert({
+      household_id: householdId, type:'expense', description: qcDesc,
+      amount_czk: czk, display_amount: amt, display_currency: qcCur,
+      category: 'Business Expense', person: 'joint', date: qcDate, source: 'business'
+    }).select().single()
+    if (data) setHHEntries(p => [data, ...p])
+    setQcDesc(''); setQcAmt(''); setShowQuickCost(false); setCapSaving(false)
+  }
+
   async function confirmSell() {
     if (!sellInv || !sellRevenue) return
     setLoading(true)
@@ -225,7 +249,8 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
 
   // Analytics
   const allRev = sales.reduce((s,x)=>s+(x.revenue_czk||0),0)
-  const allProfit = sales.reduce((s,x)=>s+profitCZK(x),0)
+  const allRunningCosts = hhEntries.filter(e=>e.category==='Business Expense').reduce((s:number,x:any)=>s+x.amount_czk,0)
+  const allProfit = sales.reduce((s,x)=>s+profitCZK(x),0) - allRunningCosts
   const monthStats = months.map(m => {
     const ms = sales.filter(s=>s.date?.startsWith(m))
     const r=ms.reduce((s,x)=>s+(x.revenue_czk||0),0), c=ms.reduce((s,x)=>s+(x.watch_cost_czk||0)+(x.shipping_czk||0)+(x.ads_czk||0),0)
@@ -259,9 +284,21 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
           </div>
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
             <div className="toggle">{CURS.map(c=><button key={c} className={'toggle-btn '+(dc===c?'active':'')} onClick={()=>setDc(c)} style={{ fontSize:11 }}>{c}</button>)}</div>
+            <button onClick={()=>setShowQuickCost(true)} style={{ background:'var(--surface2)', border:'1px solid var(--border2)', color:'var(--text)', borderRadius:8, padding:'8px 16px', fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>📢 + Add cost</button>
             <button onClick={()=>{setForm(EF());setEditId(null);setShowForm(true)}} style={{ background:'var(--acc2)', border:'none', color:'#fff', borderRadius:8, padding:'8px 18px', fontSize:13, fontWeight:500, cursor:'pointer', fontFamily:'inherit' }}>+ Add sale</button>
           </div>
         </div>
+
+        {/* Running costs banner — shown if any exist for this period */}
+        {totRunningCost > 0 && (
+          <div style={{ background:'rgba(239,68,68,.07)', border:'1px solid rgba(239,68,68,.2)', borderRadius:10, padding:'10px 16px', marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div>
+              <span style={{ fontSize:12, fontWeight:700, color:'var(--red)' }}>📢 Running costs (ads, fees) included in totals</span>
+              <span style={{ fontSize:11, color:'var(--muted)', marginLeft:8 }}>{filteredRunningCosts.length} item{filteredRunningCosts.length!==1?'s':''} · {filterMonth==='all'?'all time':filterMonth}</span>
+            </div>
+            <span style={{ fontSize:15, fontWeight:800, color:'var(--red)' }}>-{fmtC(totRunningCost,dc)}</span>
+          </div>
+        )}
 
         <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:10 }}>
           <div className="rates-badge">
@@ -769,6 +806,48 @@ export default function BusinessClient({ householdId }: { householdId:string }) 
           })()}
         </div>
       )}
+
+            {/* ─── QUICK COST MODAL ─── */}
+            {showQuickCost && (
+              <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
+                <div style={{ background:'var(--surface)', border:'1px solid var(--border2)', borderRadius:16, padding:28, width:420, maxWidth:'95vw' }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:18 }}>
+                    <div>
+                      <div style={{ fontSize:16, fontWeight:700 }}>📢 Add a cost</div>
+                      <div style={{ fontSize:12, color:'var(--muted)', marginTop:2 }}>Ads, fees, or any cost not tied to one sale</div>
+                    </div>
+                    <button onClick={()=>setShowQuickCost(false)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:20 }}>✕</button>
+                  </div>
+                  <div style={{ marginBottom:12 }}>
+                    <label style={{ fontSize:11, color:'var(--muted)', fontWeight:700, display:'block', marginBottom:5 }}>Description</label>
+                    <input value={qcDesc} onChange={e=>setQcDesc(e.target.value)} placeholder="e.g. Meta ads — May" style={INP} autoFocus />
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 100px 1fr', gap:10, marginBottom:18 }}>
+                    <div>
+                      <label style={{ fontSize:11, color:'var(--muted)', fontWeight:700, display:'block', marginBottom:5 }}>Amount</label>
+                      <input type="number" value={qcAmt} onChange={e=>setQcAmt(e.target.value)} placeholder="0" style={INP} onKeyDown={e=>{ if(e.key==='Enter'&&qcAmt&&qcDesc) addQuickCost() }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize:11, color:'var(--muted)', fontWeight:700, display:'block', marginBottom:5 }}>Currency</label>
+                      <select value={qcCur} onChange={e=>setQcCur(e.target.value)} style={INP}>{CURS.map(c=><option key={c} value={c}>{c}</option>)}</select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize:11, color:'var(--muted)', fontWeight:700, display:'block', marginBottom:5 }}>Date</label>
+                      <input type="date" value={qcDate} onChange={e=>setQcDate(e.target.value)} style={INP} />
+                    </div>
+                  </div>
+                  <div style={{ background:'var(--surface2)', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:12, color:'var(--muted)' }}>
+                    This goes into the same pool as <strong style={{ color:'var(--text)' }}>Running Costs</strong> in the Capital tab. It will reduce overall profit shown in Sales, Analytics, and the Dashboard — without being attached to any single watch.
+                  </div>
+                  <div style={{ display:'flex', gap:8 }}>
+                    <button onClick={addQuickCost} disabled={capSaving||!qcAmt||!qcDesc} style={{ flex:1, background:'var(--red)', border:'none', color:'#fff', borderRadius:8, padding:'10px', fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit', opacity:(!qcAmt||!qcDesc)?.5:1 }}>
+                      {capSaving?'Adding…':'Add cost'}
+                    </button>
+                    <button onClick={()=>setShowQuickCost(false)} style={{ background:'none', border:'1px solid var(--border2)', color:'var(--muted)', borderRadius:8, padding:'10px 16px', fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>Cancel</button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ─── QUICK SELL MODAL ─── */}
       {sellInv && (
